@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Department {
+  id               String                    @id @default(cuid())
+  name             String                    @unique
+  isActive         Boolean                   @default(true)
+  users            User[]
+  scheduleTasks    ScheduleTask[]
+  scheduleDoctors  ScheduleDoctor[]
+  unavailableTimes DoctorUnavailableTime[]
+  requirements     ScheduleRequirement[]
+  assignments      ScheduleAssignment[]
+  conflicts        ScheduleConflict[]
+  accessCodes      DepartmentAccessCode[]
+  guestSessions    GuestSession[]
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([name])
+}
+
+model User {
+  id                 String      @id @default(cuid())
+  username           String      @unique
+  passwordHash       String
+  role               String
+  departmentId       String?
+  department         Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  sessions           Session[]
+  mustChangePassword Boolean     @default(false)
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([departmentId])
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model DepartmentAccessCode {
+  id           String     @id @default(cuid())
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  codeHash     String     @unique
+  expiresAt    DateTime
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([departmentId])
+  @@index([expiresAt])
+}
+
+model GuestSession {
+  id           String     @id @default(cuid())
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  tokenHash    String     @unique
+  expiresAt    DateTime
+  createdAt    DateTime   @default(now())
+
+  @@index([departmentId])
+  @@index([expiresAt])
+}
+
+model ScheduleTask {
+  id               String                    @id @default(cuid())
+  departmentId     String
+  department       Department                @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  weekStartDate    DateTime
+  weekEndDate      DateTime
+  mode             String
+  status           String                    @default("DRAFT")
+  doctors          ScheduleDoctor[]
+  unavailableTimes DoctorUnavailableTime[]
+  requirements     ScheduleRequirement[]
+  assignments      ScheduleAssignment[]
+  conflicts        ScheduleConflict[]
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([departmentId])
+  @@index([weekStartDate])
+  @@index([status])
+}
+
+model ScheduleDoctor {
+  id               String                    @id @default(cuid())
+  departmentId     String?
+  department       Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  scheduleTaskId   String
+  scheduleTask     ScheduleTask              @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  name             String
+  doctorType       String
+  unavailableTimes DoctorUnavailableTime[]
+  assignments      ScheduleAssignment[]
+  createdAt        DateTime                  @default(now())
+
+  @@unique([scheduleTaskId, name])
+  @@index([departmentId])
+  @@index([scheduleTaskId])
+}
+
+model DoctorUnavailableTime {
+  id             String         @id @default(cuid())
+  departmentId   String?
+  department     Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  scheduleTaskId String
+  scheduleTask   ScheduleTask   @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  doctorId       String
+  doctor         ScheduleDoctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  date           DateTime
+  weekday        Int
+  timeSlot       String
+  reason         String?
+  createdAt      DateTime       @default(now())
+
+  @@unique([scheduleTaskId, doctorId, date, timeSlot])
+  @@index([departmentId])
+  @@index([scheduleTaskId, doctorId])
+  @@index([date, timeSlot])
+}
+
+model ScheduleRequirement {
+  id              String       @id @default(cuid())
+  departmentId    String?
+  department      Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  scheduleTaskId  String
+  scheduleTask    ScheduleTask @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  date            DateTime
+  weekday         Int
+  timeSlot        String
+  enabled         Boolean      @default(true)
+  roomNumber      Int
+  requiredDoctors Int
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([scheduleTaskId, date, timeSlot, roomNumber])
+  @@index([departmentId])
+  @@index([scheduleTaskId])
+  @@index([date, timeSlot])
+}
+
+model ScheduleAssignment {
+  id             String         @id @default(cuid())
+  departmentId   String?
+  department     Department?    @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  scheduleTaskId String
+  scheduleTask   ScheduleTask   @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  date           DateTime
+  weekday        Int
+  roomNumber     Int
+  timeSlot       String
+  doctorId       String
+  doctor         ScheduleDoctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  locked         Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([scheduleTaskId, date, timeSlot, doctorId])
+  @@index([departmentId])
+  @@index([scheduleTaskId, date, timeSlot])
+  @@index([scheduleTaskId, roomNumber])
+}
+
+model ScheduleConflict {
+  id             String       @id @default(cuid())
+  departmentId   String?
+  department     Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  scheduleTaskId String
+  scheduleTask   ScheduleTask @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  date           DateTime
+  weekday        Int
+  roomNumber     Int
+  timeSlot       String
+  conflictType   String
+  missingCount   Int?
+  description    String
+  severity       String       @default("WARNING")
+  createdAt      DateTime     @default(now())
+
+  @@index([departmentId])
+  @@index([scheduleTaskId])
+  @@index([date, timeSlot])
+}
