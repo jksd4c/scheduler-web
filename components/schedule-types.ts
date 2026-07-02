@@ -7,8 +7,12 @@ export type ConflictSeverity = "INFO" | "WARNING" | "ERROR";
 export type ApiDoctor = {
   id: string;
   scheduleTaskId: string;
+  staffProfileId?: string | null;
   name: string;
   doctorType: DoctorType;
+  active?: boolean;
+  tagSnapshotJson?: unknown;
+  policySnapshotJson?: unknown;
   createdAt: string;
 };
 
@@ -29,6 +33,23 @@ export type ApiRequirement = {
   date: string;
   weekday: number;
   timeSlot: TimeSlot;
+  shiftTypeId?: string | null;
+  shiftType?: {
+    id: string;
+    name: string;
+    category: string;
+    isNight: boolean;
+    workloadWeight: number;
+    requiredTags?: Array<{
+      id: string;
+      staffTagId: string;
+      requirementType: string;
+      staffTag?: {
+        id: string;
+        name: string;
+      } | null;
+    }>;
+  } | null;
   enabled: boolean;
   roomNumber: number;
   requiredDoctors: number;
@@ -77,6 +98,17 @@ export type DoctorStats = {
   maxConsecutiveDays: number;
   hasConsecutiveWork: boolean;
   unavailableConflictCount: number;
+  tagNames?: string[];
+  eligibilitySummary?: string;
+  dayShiftAssignments?: number;
+  nightShiftAssignments?: number;
+  firstLineAssignments?: number;
+  secondLineAssignments?: number;
+  emergencyAssignments?: number;
+  onCallAssignments?: number;
+  backupAssignments?: number;
+  workloadTotal?: number;
+  targetWorkloadFactor?: number;
   assignments: Array<{
     id: string;
     date: string;
@@ -106,6 +138,13 @@ export type ScheduleStats = {
     conflictCount: number;
   };
   warnings: string[];
+  identityGroups?: Array<{
+    tagName: string;
+    memberCount: number;
+    totalAssignments: number;
+    nightAssignments: number;
+    secondLineAssignments: number;
+  }>;
 };
 
 export type ApiTaskDetail = {

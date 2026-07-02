@@ -2,12 +2,20 @@
 
 import { ArrowLeft, CalendarPlus, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getNextMonday, getWeekEndDateKey } from "@/lib/date-utils";
 import { MODE_LABELS } from "@/lib/schedule-rules";
 import { mergeDoctorNameLists } from "@/lib/name-parser";
 import type { ScheduleMode } from "@/components/schedule-types";
+
+type StaffOption = {
+  id: string;
+  displayName: string;
+  active: boolean;
+  tagSnapshot?: Array<{ id: string; name: string; color?: string | null }>;
+  eligibilitySummary?: string;
+};
 
 export function NewTaskForm() {
   const router = useRouter();
@@ -15,11 +23,20 @@ export function NewTaskForm() {
   const [mode, setMode] = useState<ScheduleMode>("FULL_DAY");
   const [residentNames, setResidentNames] = useState("");
   const [internNames, setInternNames] = useState("");
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
+  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const parsed = useMemo(() => mergeDoctorNameLists(residentNames, internNames), [residentNames, internNames]);
-  const totalDoctors = parsed.residents.length + parsed.interns.length;
+  const totalDoctors = parsed.residents.length + parsed.interns.length + selectedStaffIds.length;
+
+  useEffect(() => {
+    fetch("/api/staff")
+      .then((response) => (response.ok ? response.json() : { staff: [] }))
+      .then((data) => setStaffOptions((data.staff ?? []).filter((item: StaffOption) => item.active)))
+      .catch(() => setStaffOptions([]));
+  }, []);
 
   async function submit() {
     setSubmitting(true);
@@ -28,7 +45,7 @@ export function NewTaskForm() {
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ weekStartDate, mode, residentNames, internNames })
+        body: JSON.stringify({ weekStartDate, mode, residentNames, internNames, staffProfileIds: selectedStaffIds })
       });
       const data = await response.json();
       if (!response.ok) {
@@ -111,6 +128,51 @@ export function NewTaskForm() {
                 className="focus-ring mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
             </label>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-semibold text-slate-900">从人员库选择</h3>
+                <p className="mt-1 text-xs text-slate-500">所选人员会保存本次身份/策略快照；也可以继续在上方临时输入人员。</p>
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setSelectedStaffIds(staffOptions.map((item) => item.id))} className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs">
+                  选择全部启用人员
+                </button>
+                <button type="button" onClick={() => setSelectedStaffIds([])} className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs">
+                  清空选择
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 grid max-h-72 gap-2 overflow-auto md:grid-cols-2">
+              {staffOptions.map((item) => (
+                <label key={item.id} className="flex items-start gap-2 rounded-md border border-slate-200 bg-white p-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={selectedStaffIds.includes(item.id)}
+                    onChange={(event) =>
+                      setSelectedStaffIds((previous) =>
+                        event.target.checked ? [...previous, item.id] : previous.filter((id) => id !== item.id)
+                      )
+                    }
+                  />
+                  <span>
+                    <span className="font-medium text-slate-900">{item.displayName}</span>
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {(item.tagSnapshot ?? []).map((tag) => (
+                        <span key={tag.id} className="rounded-full px-1.5 py-0.5 text-[11px] text-white" style={{ backgroundColor: tag.color ?? "#64748b" }}>
+                          {tag.name}
+                        </span>
+                      ))}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500">{item.eligibilitySummary}</span>
+                  </span>
+                </label>
+              ))}
+              {!staffOptions.length ? <div className="text-sm text-slate-500">暂无人员库记录，可先到“人员管理”维护。</div> : null}
+            </div>
           </div>
 
           {error ? (

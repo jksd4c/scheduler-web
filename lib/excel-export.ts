@@ -18,8 +18,8 @@ import type { getTaskDetail } from "@/lib/tasks";
 type TaskDetail = NonNullable<Awaited<ReturnType<typeof getTaskDetail>>>;
 
 const DOCTOR_TYPE_LABEL: Record<DoctorTypeValue, string> = {
-  RESIDENT: "\u89c4\u57f9",
-  INTERN: "\u5b9e\u4e60"
+  RESIDENT: "A组",
+  INTERN: "B组"
 };
 
 function doctorNamesForCell(task: TaskDetail, dateKey: string, timeSlot: TimeSlotValue, roomNumber: number) {
@@ -49,14 +49,14 @@ function styleWorksheet(sheet: ExcelJS.Worksheet) {
 
 export async function createScheduleWorkbook(task: TaskDetail) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "\u5fc3\u7535\u56fe\u5ba4\u5468\u6392\u73ed\u7cfb\u7edf";
+  workbook.creator = "公平排班";
   workbook.created = new Date();
 
   const requirementCells = requirementsToCells(task.requirements);
   const maxRoomNumber = Math.max(1, getMaxRoomNumberFromRequirements(task.requirements));
   const roomNumbers = Array.from({ length: maxRoomNumber }, (_, index) => index + 1);
-  const roomHeaders = roomNumbers.map((room) => `\u8bca\u5ba4${room}`);
-  const scheduleSheet = workbook.addWorksheet("\u8bca\u5ba4\u6392\u73ed\u8868");
+  const roomHeaders = roomNumbers.map((room) => `单元${room}`);
+  const scheduleSheet = workbook.addWorksheet("单元排班表");
   scheduleSheet.columns =
     task.mode === "FULL_DAY"
       ? [
@@ -99,11 +99,19 @@ export async function createScheduleWorkbook(task: TaskDetail) {
   }
   styleWorksheet(scheduleSheet);
 
-  const statsSheet = workbook.addWorksheet("\u533b\u751f\u4e2a\u4eba\u6392\u73ed\u7edf\u8ba1");
+  const statsSheet = workbook.addWorksheet("人员个人排班统计");
   statsSheet.columns = [
-    { header: "\u533b\u751f", key: "name", width: 14 },
-    { header: "\u7c7b\u578b", key: "doctorType", width: 10 },
+    { header: "人员", key: "name", width: 14 },
+    { header: "分组", key: "doctorType", width: 10 },
+    { header: "身份/资格", key: "tags", width: 28 },
+    { header: "最终资格摘要", key: "eligibilitySummary", width: 42 },
     { header: "\u603b\u73ed\u6b21\u6570", key: "totalAssignments", width: 12 },
+    { header: "工作量", key: "workloadTotal", width: 10 },
+    { header: "工作量系数", key: "targetWorkloadFactor", width: 12 },
+    { header: "夜班", key: "nightShiftAssignments", width: 10 },
+    { header: "一线班", key: "firstLineAssignments", width: 10 },
+    { header: "二线班", key: "secondLineAssignments", width: 10 },
+    { header: "急诊班", key: "emergencyAssignments", width: 10 },
     { header: "\u5168\u5929\u73ed\u6b21\u6570", key: "fullDayAssignments", width: 12 },
     { header: "\u4e0a\u5348\u73ed\u6b21\u6570", key: "morningAssignments", width: 12 },
     { header: "\u4e0b\u5348\u73ed\u6b21\u6570", key: "afternoonAssignments", width: 12 },
@@ -117,19 +125,36 @@ export async function createScheduleWorkbook(task: TaskDetail) {
     statsSheet.addRow({
       ...item,
       doctorType: DOCTOR_TYPE_LABEL[item.doctorType],
+      tags: item.tagNames?.join("、") ?? "",
       details: item.assignments
-        .map((assignment) => `${assignment.date}${assignment.weekdayLabel}${assignment.timeSlotLabel} \u8bca\u5ba4${assignment.roomNumber}`)
+        .map((assignment) => `${assignment.date}${assignment.weekdayLabel}${assignment.timeSlotLabel} 单元${assignment.roomNumber}`)
         .join("\uff1b")
     });
   }
   styleWorksheet(statsSheet);
+
+  const identitySheet = workbook.addWorksheet("身份资格分组统计");
+  identitySheet.columns = [
+    { header: "身份/资格", key: "tagName", width: 20 },
+    { header: "人数", key: "memberCount", width: 10 },
+    { header: "总班次", key: "totalAssignments", width: 12 },
+    { header: "夜班", key: "nightAssignments", width: 10 },
+    { header: "二线班", key: "secondLineAssignments", width: 10 }
+  ];
+  for (const group of task.stats.identityGroups ?? []) {
+    identitySheet.addRow(group);
+  }
+  if (!task.stats.identityGroups?.length) {
+    identitySheet.addRow({ tagName: "暂无身份/资格分组", memberCount: 0, totalAssignments: 0, nightAssignments: 0, secondLineAssignments: 0 });
+  }
+  styleWorksheet(identitySheet);
 
   const conflictSheet = workbook.addWorksheet("\u51b2\u7a81\u62a5\u544a");
   conflictSheet.columns = [
     { header: "\u65e5\u671f", key: "date", width: 14 },
     { header: "\u661f\u671f", key: "weekday", width: 10 },
     { header: "\u65f6\u6bb5", key: "timeSlot", width: 10 },
-    { header: "\u8bca\u5ba4", key: "roomNumber", width: 10 },
+    { header: "单元", key: "roomNumber", width: 10 },
     { header: "\u7f3a\u5c11\u4eba\u6570", key: "missingCount", width: 12 },
     { header: "\u7c7b\u578b", key: "conflictType", width: 18 },
     { header: "\u4e25\u91cd\u7a0b\u5ea6", key: "severity", width: 12 },
@@ -140,7 +165,7 @@ export async function createScheduleWorkbook(task: TaskDetail) {
       date: toDateKey(conflict.date),
       weekday: getWeekdayLabel(conflict.weekday),
       timeSlot: SLOT_LABELS[asTimeSlot(conflict.timeSlot)],
-      roomNumber: `\u8bca\u5ba4${conflict.roomNumber}`,
+      roomNumber: `单元${conflict.roomNumber}`,
       missingCount: conflict.missingCount ?? 0,
       conflictType: conflict.conflictType,
       severity: conflict.severity,

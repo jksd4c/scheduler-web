@@ -20,6 +20,7 @@ type IncomingRequirement = {
   date?: string;
   weekday?: number;
   timeSlot?: TimeSlotValue;
+  shiftTypeId?: string | null;
   enabled?: boolean;
   roomNumber?: number;
   requiredDoctors?: number;
@@ -42,6 +43,14 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     }
 
     const mode = asScheduleMode(task.mode);
+    const requestedShiftTypeIds = Array.from(new Set(records.map((record) => String(record.shiftTypeId ?? "")).filter(Boolean)));
+    const validShiftTypes = requestedShiftTypeIds.length
+      ? await prisma.shiftType.findMany({
+          where: { id: { in: requestedShiftTypeIds }, unitId: task.unitId ?? "__none__", active: true },
+          select: { id: true }
+        })
+      : [];
+    const validShiftTypeIds = new Set(validShiftTypes.map((item) => item.id));
     const weekDays = getWeekDates(task.weekStartDate);
     const weekdayByDate = new Map(weekDays.map((day) => [day.dateKey, day.weekday]));
     const dedupe = new Set<string>();
@@ -51,6 +60,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       date: Date;
       weekday: number;
       timeSlot: TimeSlotValue;
+      shiftTypeId?: string | null;
       enabled: boolean;
       roomNumber: number;
       requiredDoctors: number;
@@ -93,6 +103,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
         date: dateFromKey(date),
         weekday,
         timeSlot,
+        shiftTypeId: validShiftTypeIds.has(String(record.shiftTypeId ?? "")) ? String(record.shiftTypeId) : null,
         enabled: true,
         roomNumber,
         requiredDoctors

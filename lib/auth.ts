@@ -175,6 +175,37 @@ export async function requireUnitAccess(unitId: string) {
   throw new AuthError("无权限访问该病区", 403);
 }
 
+export async function requireManagedUnit(unitId?: string | null) {
+  const user = await requireUser();
+  const requestedUnitId = String(unitId ?? "").trim();
+
+  if (user.role === USER_ROLE.SUPER_ADMIN) {
+    const unit = requestedUnitId
+      ? await prisma.unit.findUnique({ where: { id: requestedUnitId }, include: { hospital: true, department: true } })
+      : await prisma.unit.findFirst({
+          where: { isActive: true, department: { isActive: true } },
+          orderBy: { createdAt: "asc" },
+          include: { hospital: true, department: true }
+        });
+    if (!unit || !unit.isActive || !unit.department.isActive || (unit.hospitalId && !unit.hospital?.isActive)) {
+      throw new AuthError("请选择有效病区", 400);
+    }
+    return { user, unit };
+  }
+
+  if (!isSchedulerAdminRole(user.role) || !user.unitId) {
+    throw new AuthError("无权限访问", 403);
+  }
+  if (requestedUnitId && requestedUnitId !== user.unitId) {
+    throw new AuthError("无权限管理其他病区", 403);
+  }
+  const unit = await prisma.unit.findUnique({ where: { id: user.unitId }, include: { hospital: true, department: true } });
+  if (!unit || !unit.isActive || !unit.department.isActive || (unit.hospitalId && !unit.hospital?.isActive)) {
+    throw new AuthError("所属病区已停用", 403);
+  }
+  return { user, unit };
+}
+
 export async function requireScheduleTaskAccess(taskId: string) {
   const user = await requireUser();
   const task = await prisma.scheduleTask.findUnique({

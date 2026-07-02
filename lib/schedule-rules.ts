@@ -61,6 +61,22 @@ export type ScheduleRequirementLike = {
   date: Date | string;
   weekday: number;
   timeSlot: string;
+  shiftTypeId?: string | null;
+  shiftType?: {
+    id: string;
+    name: string;
+    category: string;
+    isNight: boolean;
+    workloadWeight: number;
+    requiredTags?: Array<{
+      requirementType: string;
+      staffTagId: string;
+      staffTag?: {
+        id: string;
+        name: string;
+      } | null;
+    }>;
+  } | null;
   enabled: boolean;
   roomNumber: number;
   requiredDoctors: number;
@@ -72,6 +88,8 @@ export type RequiredScheduleCell = {
   weekday: WeekdayNumber;
   roomNumber: number;
   timeSlot: TimeSlotValue;
+  shiftTypeId?: string | null;
+  shiftType?: ScheduleRequirementLike["shiftType"];
   requiredDoctors: number;
 };
 
@@ -149,6 +167,8 @@ export function requirementsToCells(requirements: ScheduleRequirementLike[]): Re
       weekday: Math.max(1, Math.min(7, item.weekday)) as WeekdayNumber,
       roomNumber: item.roomNumber,
       timeSlot: asTimeSlot(item.timeSlot),
+      shiftTypeId: item.shiftTypeId ?? null,
+      shiftType: item.shiftType ?? null,
       requiredDoctors: item.requiredDoctors
     }))
     .sort((a, b) => {

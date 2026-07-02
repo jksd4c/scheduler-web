@@ -6,16 +6,20 @@ import {
   isWeekend,
   SLOT_LABELS,
   TIME_SLOT,
+  requirementsToCells,
   type DoctorTypeValue,
   type ScheduleModeValue,
   type ScheduleRequirementLike,
   type TimeSlotValue
 } from "@/lib/schedule-rules";
+import { parseEffectivePolicy, parseTagSnapshot, SHIFT_TYPE_CATEGORY, summarizeEligibility } from "@/lib/staff-policy";
 
 export type DoctorLike = {
   id: string;
   name: string;
   doctorType: DoctorTypeValue;
+  tagSnapshotJson?: unknown;
+  policySnapshotJson?: unknown;
 };
 
 export type AssignmentLike = {
@@ -59,6 +63,17 @@ export type DoctorScheduleStats = {
   maxConsecutiveDays: number;
   hasConsecutiveWork: boolean;
   unavailableConflictCount: number;
+  tagNames: string[];
+  eligibilitySummary: string;
+  dayShiftAssignments: number;
+  nightShiftAssignments: number;
+  firstLineAssignments: number;
+  secondLineAssignments: number;
+  emergencyAssignments: number;
+  onCallAssignments: number;
+  backupAssignments: number;
+  workloadTotal: number;
+  targetWorkloadFactor: number;
   assignments: DoctorAssignmentSummary[];
 };
 
@@ -81,6 +96,13 @@ export type ScheduleStats = {
   perDoctor: DoctorScheduleStats[];
   overall: OverallScheduleStats;
   warnings: string[];
+  identityGroups: Array<{
+    tagName: string;
+    memberCount: number;
+    totalAssignments: number;
+    nightAssignments: number;
+    secondLineAssignments: number;
+  }>;
 };
 
 export function calculateScheduleStats(input: {
@@ -97,6 +119,8 @@ export function calculateScheduleStats(input: {
 
   const perDoctorMap = new Map<string, DoctorScheduleStats>();
   for (const doctor of input.doctors) {
+    const tags = parseTagSnapshot(doctor.tagSnapshotJson);
+    const policy = parseEffectivePolicy(doctor.policySnapshotJson);
     perDoctorMap.set(doctor.id, {
       doctorId: doctor.id,
       name: doctor.name,
@@ -110,11 +134,23 @@ export function calculateScheduleStats(input: {
       maxConsecutiveDays: 0,
       hasConsecutiveWork: false,
       unavailableConflictCount: 0,
+      tagNames: tags.map((tag) => tag.name),
+      eligibilitySummary: summarizeEligibility(policy),
+      dayShiftAssignments: 0,
+      nightShiftAssignments: 0,
+      firstLineAssignments: 0,
+      secondLineAssignments: 0,
+      emergencyAssignments: 0,
+      onCallAssignments: 0,
+      backupAssignments: 0,
+      workloadTotal: 0,
+      targetWorkloadFactor: policy.workloadFactor,
       assignments: []
     });
   }
 
   const workedDateKeysByDoctor = new Map<string, Set<string>>();
+  const requirementCells = requirementsToCells(input.requirements);
 
   for (const assignment of input.assignments) {
     const stats = perDoctorMap.get(assignment.doctorId);
@@ -142,6 +178,22 @@ export function calculateScheduleStats(input: {
     if (isDoctorUnavailable(input.unavailableTimes, assignment.doctorId, assignment.date, assignment.timeSlot)) {
       stats.unavailableConflictCount += 1;
     }
+    const matchingCell = requirementCells.find(
+      (cell) => cell.dateKey === dateKey && cell.timeSlot === assignment.timeSlot && cell.roomNumber === assignment.roomNumber
+    );
+    const category = matchingCell?.shiftType?.category ?? "";
+    const isNightShift = Boolean(matchingCell?.shiftType?.isNight) || category === SHIFT_TYPE_CATEGORY.NIGHT;
+    if (isNightShift) {
+      stats.nightShiftAssignments += 1;
+    } else {
+      stats.dayShiftAssignments += 1;
+    }
+    if (category === SHIFT_TYPE_CATEGORY.FIRST_LINE) stats.firstLineAssignments += 1;
+    if (category === SHIFT_TYPE_CATEGORY.SECOND_LINE) stats.secondLineAssignments += 1;
+    if (category === SHIFT_TYPE_CATEGORY.EMERGENCY) stats.emergencyAssignments += 1;
+    if (category === SHIFT_TYPE_CATEGORY.ON_CALL) stats.onCallAssignments += 1;
+    if (category === SHIFT_TYPE_CATEGORY.BACKUP) stats.backupAssignments += 1;
+    stats.workloadTotal += Number(matchingCell?.shiftType?.workloadWeight ?? 1) || 1;
 
     if (!workedDateKeysByDoctor.has(assignment.doctorId)) {
       workedDateKeysByDoctor.set(assignment.doctorId, new Set());
@@ -199,6 +251,7 @@ export function calculateScheduleStats(input: {
   const hasUnavailableConflicts = perDoctor.some((item) => item.unavailableConflictCount > 0);
   const hasConsecutiveWork = perDoctor.some((item) => item.hasConsecutiveWork);
   const hasObviousImbalance = doctorCount > 1 && maxAssignments - minAssignments >= 3;
+  const identityGroups = buildIdentityGroups(perDoctor);
 
   const warnings: string[] = [];
   if (unfilledAssignments > 0) {
@@ -230,6 +283,47 @@ export function calculateScheduleStats(input: {
       hasObviousImbalance,
       conflictCount: input.conflicts.length
     },
-    warnings
+    warnings,
+    identityGroups
   };
+}
+
+function buildIdentityGroups(perDoctor: DoctorScheduleStats[]) {
+  const map = new Map<
+    string,
+    {
+      tagName: string;
+      memberIds: Set<string>;
+      totalAssignments: number;
+      nightAssignments: number;
+      secondLineAssignments: number;
+    }
+  >();
+  for (const doctor of perDoctor) {
+    for (const tagName of doctor.tagNames) {
+      if (!map.has(tagName)) {
+        map.set(tagName, {
+          tagName,
+          memberIds: new Set(),
+          totalAssignments: 0,
+          nightAssignments: 0,
+          secondLineAssignments: 0
+        });
+      }
+      const group = map.get(tagName)!;
+      group.memberIds.add(doctor.doctorId);
+      group.totalAssignments += doctor.totalAssignments;
+      group.nightAssignments += doctor.nightShiftAssignments;
+      group.secondLineAssignments += doctor.secondLineAssignments;
+    }
+  }
+  return Array.from(map.values())
+    .map((group) => ({
+      tagName: group.tagName,
+      memberCount: group.memberIds.size,
+      totalAssignments: group.totalAssignments,
+      nightAssignments: group.nightAssignments,
+      secondLineAssignments: group.secondLineAssignments
+    }))
+    .sort((a, b) => a.tagName.localeCompare(b.tagName, "zh-Hans-CN"));
 }

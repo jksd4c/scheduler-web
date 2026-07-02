@@ -153,6 +153,18 @@ async function login(username, password) {
   });
 }
 
+function nextMondayKey() {
+  const now = new Date();
+  const day = now.getDay() || 7;
+  const diff = day === 1 ? 7 : 8 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diff);
+  const year = monday.getFullYear();
+  const month = String(monday.getMonth() + 1).padStart(2, "0");
+  const date = String(monday.getDate()).padStart(2, "0");
+  return `${year}-${month}-${date}`;
+}
+
 async function main() {
   const superAdminUsername = requiredEnv("INITIAL_SUPER_ADMIN_USERNAME");
   const superAdminPassword = requiredEnv("INITIAL_SUPER_ADMIN_PASSWORD");
@@ -244,6 +256,111 @@ async function main() {
     })
   });
   assert(feedbackResult.response.status === 201, "registered user can submit feedback");
+
+  const staffTagsPage = await request("/dashboard/staff-tags", { headers: { Cookie: registerResult.cookie } });
+  assert(staffTagsPage.status === 200, "SCHEDULER_ADMIN can access staff tag settings");
+
+  const staffPage = await request("/dashboard/staff", { headers: { Cookie: registerResult.cookie } });
+  assert(staffPage.status === 200, "SCHEDULER_ADMIN can access staff management");
+
+  const shiftTypesPage = await request("/dashboard/shift-types", { headers: { Cookie: registerResult.cookie } });
+  assert(shiftTypesPage.status === 200, "SCHEDULER_ADMIN can access shift type settings");
+
+  async function createTag(name, category, policy) {
+    const result = await jsonRequest("/api/staff-tags", {
+      method: "POST",
+      headers: { Cookie: registerResult.cookie },
+      body: JSON.stringify({ name: `${name}-${unique}`, category, policy })
+    });
+    assert(result.response.status === 201, `created staff tag ${name}`);
+    return result.data.tag;
+  }
+
+  const internTag = await createTag("实习医生", "TRAINING", {
+    canWorkDayShift: true,
+    canWorkNightShift: false,
+    canWorkSecondLine: false,
+    canWorkIndependently: false,
+    workloadFactor: 0.5
+  });
+  const residentTag = await createTag("规培医生", "TRAINING", {
+    canWorkDayShift: true,
+    canWorkNightShift: true,
+    canWorkFirstLine: true,
+    maxWorkDaysPerWeek: 5,
+    workloadFactor: 0.8
+  });
+  const firstLineTag = await createTag("一线资格", "DUTY_QUALIFICATION", { canWorkFirstLine: true });
+  const secondLineTag = await createTag("二线资格", "DUTY_QUALIFICATION", { canWorkSecondLine: true });
+  const nightTag = await createTag("可夜班", "DUTY_QUALIFICATION", { canWorkNightShift: true });
+
+  async function createStaff(displayName, tagIds) {
+    const result = await jsonRequest("/api/staff", {
+      method: "POST",
+      headers: { Cookie: registerResult.cookie },
+      body: JSON.stringify({ displayName: `${displayName}-${unique}`, tagIds })
+    });
+    assert(result.response.status === 201, `created staff ${displayName}`);
+    return result.data.staff[0];
+  }
+
+  const seniorStaff = await createStaff("二线人员", [secondLineTag.id, nightTag.id]);
+  const internStaff = await createStaff("实习人员", [internTag.id, firstLineTag.id]);
+  await createStaff("规培人员", [residentTag.id, firstLineTag.id, nightTag.id]);
+
+  async function createShiftType(name, category, isNight, requiredTags) {
+    const result = await jsonRequest("/api/shift-types", {
+      method: "POST",
+      headers: { Cookie: registerResult.cookie },
+      body: JSON.stringify({ name: `${name}-${unique}`, category, isNight, requiredTags })
+    });
+    assert(result.response.status === 201, `created shift type ${name}`);
+    return result.data.shiftType;
+  }
+
+  await createShiftType("一线班", "FIRST_LINE", false, [{ staffTagId: firstLineTag.id, requirementType: "REQUIRED" }]);
+  const secondLineShift = await createShiftType("二线班", "SECOND_LINE", false, [{ staffTagId: secondLineTag.id, requirementType: "REQUIRED" }]);
+  const nightShift = await createShiftType("夜班", "NIGHT", true, [
+    { staffTagId: nightTag.id, requirementType: "REQUIRED" },
+    { staffTagId: internTag.id, requirementType: "FORBIDDEN" }
+  ]);
+
+  const weekStartDate = nextMondayKey();
+  const taskResult = await jsonRequest("/api/tasks", {
+    method: "POST",
+    headers: { Cookie: registerResult.cookie },
+    body: JSON.stringify({
+      weekStartDate,
+      mode: "HALF_DAY",
+      staffProfileIds: [seniorStaff.id, internStaff.id]
+    })
+  });
+  assert(taskResult.response.status === 201, "created task from staff profiles");
+  const taskId = taskResult.data.task.id;
+
+  const requirementsResult = await jsonRequest(`/api/tasks/${taskId}/requirements`, {
+    method: "PUT",
+    headers: { Cookie: registerResult.cookie },
+    body: JSON.stringify({
+      records: [
+        { date: weekStartDate, weekday: 1, timeSlot: "MORNING", roomNumber: 1, requiredDoctors: 1, enabled: true, shiftTypeId: secondLineShift.id },
+        { date: weekStartDate, weekday: 1, timeSlot: "AFTERNOON", roomNumber: 1, requiredDoctors: 2, enabled: true, shiftTypeId: nightShift.id }
+      ]
+    })
+  });
+  assert(requirementsResult.response.status === 200, "saved requirements with shift type identity rules");
+
+  const generateResult = await jsonRequest(`/api/tasks/${taskId}/generate`, {
+    method: "POST",
+    headers: { Cookie: registerResult.cookie },
+    body: JSON.stringify({})
+  });
+  assert(generateResult.response.status === 200, "generated schedule with identity strategy");
+  const generatedTask = generateResult.data.task;
+  const nightAssignments = generatedTask.assignments.filter((assignment) => assignment.timeSlot === "AFTERNOON");
+  assert(nightAssignments.every((assignment) => !assignment.doctor.name.includes("实习人员")), "night shift excludes intern tag");
+  assert(generatedTask.conflicts.some((conflict) => conflict.conflictType === "UNFILLED"), "identity shortage creates unfilled conflict");
+  assert(generatedTask.stats.identityGroups.length > 0, "fairness report includes identity groups");
 
   const editAttempt = await jsonRequest("/api/tasks/smoke-test-task/manual-adjust", {
     method: "POST",

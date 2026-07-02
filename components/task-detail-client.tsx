@@ -40,13 +40,14 @@ type ScheduleView = "room" | "doctor";
 type BusyState = "load" | "save-requirements" | "save-unavailable" | "delete-result" | "generate" | "manual" | "";
 
 type UnavailableDraft = Record<string, Record<string, { morning: boolean; afternoon: boolean }>>;
-type RequirementSlotDraft = { enabled: boolean; rooms: number; requiredDoctors: number };
+type RequirementSlotDraft = { enabled: boolean; rooms: number; requiredDoctors: number; shiftTypeId?: string };
 type RequirementDayDraft = {
   fullDay: RequirementSlotDraft;
   morning: RequirementSlotDraft;
   afternoon: RequirementSlotDraft;
 };
 type RequirementDraft = Record<string, RequirementDayDraft>;
+type ShiftTypeOption = { id: string; name: string; category: string; isNight: boolean; active: boolean };
 
 const TABS: Array<{ id: TabId; label: string; Icon: LucideIcon }> = [
   { id: "requirements", label: "排班规则", Icon: Table2 },
@@ -70,7 +71,7 @@ function severityClass(severity: string) {
 }
 
 function createClosedSlot(): RequirementSlotDraft {
-  return { enabled: false, rooms: 0, requiredDoctors: 1 };
+  return { enabled: false, rooms: 0, requiredDoctors: 1, shiftTypeId: "" };
 }
 
 function buildUnavailableDraft(task: ApiTaskDetail) {
@@ -119,6 +120,7 @@ function buildRequirementDraft(task: ApiTaskDetail): RequirementDraft {
     day[key].enabled = true;
     day[key].rooms = Math.max(day[key].rooms, requirement.roomNumber);
     day[key].requiredDoctors = clampRequiredDoctors(requirement.requiredDoctors);
+    day[key].shiftTypeId = requirement.shiftTypeId ?? "";
   }
   return draft;
 }
@@ -128,6 +130,7 @@ function expandRequirementDraft(task: ApiTaskDetail, draft: RequirementDraft) {
     date: string;
     weekday: number;
     timeSlot: TimeSlot;
+    shiftTypeId?: string;
     enabled: boolean;
     roomNumber: number;
     requiredDoctors: number;
@@ -150,6 +153,7 @@ function expandRequirementDraft(task: ApiTaskDetail, draft: RequirementDraft) {
           date: day.dateKey,
           weekday: day.weekday,
           timeSlot: item.timeSlot,
+          shiftTypeId: item.slot.shiftTypeId || undefined,
           enabled: true,
           roomNumber,
           requiredDoctors
@@ -172,6 +176,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [requirementDraft, setRequirementDraft] = useState<RequirementDraft>({});
+  const [shiftTypes, setShiftTypes] = useState<ShiftTypeOption[]>([]);
   const [unavailableDraft, setUnavailableDraft] = useState<UnavailableDraft>({});
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
 
@@ -193,6 +198,13 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   useEffect(() => {
     void loadTask();
   }, [loadTask]);
+
+  useEffect(() => {
+    fetch("/api/shift-types")
+      .then((response) => (response.ok ? response.json() : { shiftTypes: [] }))
+      .then((data) => setShiftTypes((data.shiftTypes ?? []).filter((item: ShiftTypeOption) => item.active)))
+      .catch(() => setShiftTypes([]));
+  }, []);
 
   useEffect(() => {
     if (!task) return;
@@ -517,7 +529,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     const renderSlotControls = (dateKey: string, slotName: keyof RequirementDayDraft, label?: string) => {
       const value = requirementDraft[dateKey]?.[slotName] ?? createClosedSlot();
       return (
-        <div className="grid min-w-48 grid-cols-[auto_1fr_1fr] items-center gap-2">
+        <div className="grid min-w-[26rem] grid-cols-[auto_1fr_1fr_1.4fr] items-center gap-2">
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input
               type="checkbox"
@@ -546,6 +558,19 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             onChange={(event) => updateRequirementSlot(dateKey, slotName, { requiredDoctors: clampRequiredDoctors(Number(event.target.value)) })}
             className="focus-ring w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100"
           />
+          <select
+            value={value.shiftTypeId ?? ""}
+            disabled={!value.enabled}
+            onChange={(event) => updateRequirementSlot(dateKey, slotName, { shiftTypeId: event.target.value })}
+            className="focus-ring w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100"
+          >
+            <option value="">未绑定班次</option>
+            {shiftTypes.map((shiftType) => (
+              <option key={shiftType.id} value={shiftType.id}>
+                {shiftType.name}
+              </option>
+            ))}
+          </select>
         </div>
       );
     };
@@ -657,6 +682,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                         <th key={requirement.roomNumber} className="border-b border-slate-200 px-3 py-3 font-medium">
                           单元{requirement.roomNumber}
                           <span className="ml-1 text-xs font-normal text-slate-400">/{requirement.requiredDoctors}人</span>
+                          {requirement.shiftType ? <div className="mt-1 text-xs font-normal text-hospital-green">{requirement.shiftType.name}</div> : null}
                         </th>
                       ))}
                     </tr>
@@ -712,6 +738,44 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             {warning}
           </div>
         ))}
+      </div>
+    );
+  }
+
+  function renderIdentityGroupStats() {
+    if (!stats.identityGroups?.length) {
+      return <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">暂无身份/资格分组统计。未绑定资格的人不会参与对应班次公平比较。</div>;
+    }
+    return (
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="font-semibold text-slate-950">身份/资格分组公平统计</h3>
+          <p className="mt-1 text-xs text-slate-500">不具备某班次资格的人，不参与该班次公平比较。</p>
+        </div>
+        <div className="table-scroll">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="px-3 py-2 font-medium">身份/资格</th>
+                <th className="px-3 py-2 font-medium">人数</th>
+                <th className="px-3 py-2 font-medium">总班次</th>
+                <th className="px-3 py-2 font-medium">夜班</th>
+                <th className="px-3 py-2 font-medium">二线班</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.identityGroups.map((group) => (
+                <tr key={group.tagName}>
+                  <td className="border-t border-slate-100 px-3 py-2 font-medium text-slate-900">{group.tagName}</td>
+                  <td className="border-t border-slate-100 px-3 py-2">{group.memberCount}</td>
+                  <td className="border-t border-slate-100 px-3 py-2">{group.totalAssignments}</td>
+                  <td className="border-t border-slate-100 px-3 py-2">{group.nightAssignments}</td>
+                  <td className="border-t border-slate-100 px-3 py-2">{group.secondLineAssignments}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
@@ -788,6 +852,14 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                     <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-xs ${doctorTypeBadge(doctor.doctorType)}`}>
                       {DOCTOR_TYPE_LABEL[doctor.doctorType]}
                     </span>
+                    {doctor.tagNames?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {doctor.tagNames.map((tagName) => (
+                          <span key={tagName} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{tagName}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {doctor.eligibilitySummary ? <div className="mt-1 max-w-xs text-xs text-slate-500">{doctor.eligibilitySummary}</div> : null}
                   </td>
                   <td className="border-b border-slate-100 px-3 py-3 font-semibold">{doctor.totalAssignments}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.morningAssignments}</td>
@@ -976,6 +1048,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           </div>
           {renderStatsOverview()}
           {renderWarnings()}
+          {renderIdentityGroupStats()}
           {renderConflictReport()}
         </div>
       ) : null}
@@ -1001,6 +1074,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             </div>
           </div>
           {renderStatsOverview()}
+          {renderIdentityGroupStats()}
           {scheduleView === "room" ? renderRoomTable(false) : renderDoctorView()}
           {renderConflictReport()}
         </div>

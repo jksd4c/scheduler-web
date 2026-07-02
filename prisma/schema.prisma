@@ -62,6 +62,9 @@ model Unit {
   createdByUser   User?          @relation("CreatedUnits", fields: [createdByUserId], references: [id], onDelete: SetNull)
   users           User[]
   scheduleTasks   ScheduleTask[]
+  staffTags       StaffTag[]
+  staffProfiles   StaffProfile[]
+  shiftTypes      ShiftType[]
   feedback        Feedback[]
   auditLogs       AuditLog[]
   createdAt       DateTime       @default(now())
@@ -89,6 +92,7 @@ model User {
   unit                 Unit?                 @relation(fields: [unitId], references: [id], onDelete: SetNull)
   createdUnits         Unit[]                @relation("CreatedUnits")
   createdTasks         ScheduleTask[]
+  staffProfiles        StaffProfile[]
   sessions             Session[]
   feedback             Feedback[]
   organizationRequests OrganizationRequest[]
@@ -158,6 +162,7 @@ model ScheduleTask {
   mode             String
   status           String                  @default("DRAFT")
   doctors          ScheduleDoctor[]
+  participants     ScheduleParticipant[]
   unavailableTimes DoctorUnavailableTime[]
   requirements     ScheduleRequirement[]
   assignments      ScheduleAssignment[]
@@ -174,20 +179,27 @@ model ScheduleTask {
 }
 
 model ScheduleDoctor {
-  id               String                  @id @default(cuid())
-  departmentId     String?
-  department       Department?             @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  scheduleTaskId   String
-  scheduleTask     ScheduleTask            @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
-  name             String
-  doctorType       String
-  unavailableTimes DoctorUnavailableTime[]
-  assignments      ScheduleAssignment[]
-  createdAt        DateTime                @default(now())
+  id                 String                  @id @default(cuid())
+  departmentId       String?
+  department         Department?             @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  scheduleTaskId     String
+  scheduleTask       ScheduleTask            @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  staffProfileId     String?
+  staffProfile       StaffProfile?           @relation(fields: [staffProfileId], references: [id], onDelete: SetNull)
+  name               String
+  doctorType         String
+  active             Boolean                 @default(true)
+  tagSnapshotJson    Json?
+  policySnapshotJson Json?
+  participant        ScheduleParticipant?
+  unavailableTimes   DoctorUnavailableTime[]
+  assignments        ScheduleAssignment[]
+  createdAt          DateTime                @default(now())
 
   @@unique([scheduleTaskId, name])
   @@index([departmentId])
   @@index([scheduleTaskId])
+  @@index([staffProfileId])
 }
 
 model DoctorUnavailableTime {
@@ -219,6 +231,8 @@ model ScheduleRequirement {
   date            DateTime
   weekday         Int
   timeSlot        String
+  shiftTypeId     String?
+  shiftType       ShiftType?   @relation(fields: [shiftTypeId], references: [id], onDelete: SetNull)
   enabled         Boolean      @default(true)
   roomNumber      Int
   requiredDoctors Int
@@ -228,7 +242,158 @@ model ScheduleRequirement {
   @@unique([scheduleTaskId, date, timeSlot, roomNumber])
   @@index([departmentId])
   @@index([scheduleTaskId])
+  @@index([shiftTypeId])
   @@index([date, timeSlot])
+}
+
+model StaffTag {
+  id               String                 @id @default(cuid())
+  unitId           String
+  unit             Unit                   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  name             String
+  category         String                 @default("CUSTOM")
+  color            String?
+  active           Boolean                @default(true)
+  sortOrder        Int                    @default(0)
+  policy           StaffTagPolicy?
+  staffProfileTags StaffProfileTag[]
+  shiftTypeRules   ShiftTypeRequiredTag[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@unique([unitId, name])
+  @@index([unitId])
+  @@index([category])
+  @@index([active])
+}
+
+model StaffTagPolicy {
+  id                          String   @id @default(cuid())
+  staffTagId                  String   @unique
+  staffTag                    StaffTag @relation(fields: [staffTagId], references: [id], onDelete: Cascade)
+  participatesInScheduling    Boolean  @default(true)
+  canWorkDayShift             Boolean?
+  canWorkNightShift           Boolean?
+  canWorkWeekend              Boolean?
+  canWorkHoliday              Boolean?
+  canWorkFirstLine            Boolean?
+  canWorkSecondLine           Boolean?
+  canWorkEmergency            Boolean?
+  canWorkOnCall               Boolean?
+  canWorkBackup               Boolean?
+  canWorkIndependently        Boolean?
+  maxShiftsPerWeek            Int?
+  maxWorkDaysPerWeek          Int?
+  maxShiftsPerMonth           Int?
+  maxNightShiftsPerMonth      Int?
+  maxWeekendShiftsPerMonth    Int?
+  maxHolidayShiftsPerMonth    Int?
+  maxConsecutiveWorkDays      Int?
+  allowConsecutiveNightShifts Boolean?
+  allowDayAndNightSameDay     Boolean?
+  allowDayAfterNightShift     Boolean?
+  minRestHoursAfterNightShift Int?
+  workloadFactor              Float    @default(1.0)
+  note                        String?
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+}
+
+model StaffProfile {
+  id              String                @id @default(cuid())
+  unitId          String
+  unit            Unit                  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  userId          String?
+  user            User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+  displayName     String
+  phone           String?
+  email           String?
+  active          Boolean               @default(true)
+  note            String?
+  tags            StaffProfileTag[]
+  scheduleDoctors ScheduleDoctor[]
+  participants    ScheduleParticipant[]
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@unique([unitId, displayName])
+  @@unique([unitId, phone])
+  @@unique([unitId, email])
+  @@index([unitId])
+  @@index([userId])
+  @@index([active])
+}
+
+model StaffProfileTag {
+  id             String       @id @default(cuid())
+  staffProfileId String
+  staffProfile   StaffProfile @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+  staffTagId     String
+  staffTag       StaffTag     @relation(fields: [staffTagId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+
+  @@unique([staffProfileId, staffTagId])
+  @@index([staffProfileId])
+  @@index([staffTagId])
+}
+
+model ScheduleParticipant {
+  id                 String          @id @default(cuid())
+  scheduleTaskId     String
+  scheduleTask       ScheduleTask    @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  scheduleDoctorId   String?         @unique
+  scheduleDoctor     ScheduleDoctor? @relation(fields: [scheduleDoctorId], references: [id], onDelete: Cascade)
+  staffProfileId     String?
+  staffProfile       StaffProfile?   @relation(fields: [staffProfileId], references: [id], onDelete: SetNull)
+  displayName        String
+  active             Boolean         @default(true)
+  tagSnapshotJson    Json?
+  policySnapshotJson Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@unique([scheduleTaskId, displayName])
+  @@index([scheduleTaskId])
+  @@index([staffProfileId])
+  @@index([active])
+}
+
+model ShiftType {
+  id             String                 @id @default(cuid())
+  unitId         String
+  unit           Unit                   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  name           String
+  category       String                 @default("CUSTOM")
+  isNight        Boolean                @default(false)
+  workloadWeight Float                  @default(1.0)
+  startTime      String?
+  endTime        String?
+  color          String?
+  active         Boolean                @default(true)
+  requiredTags   ShiftTypeRequiredTag[]
+  requirements   ScheduleRequirement[]
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  @@unique([unitId, name])
+  @@index([unitId])
+  @@index([category])
+  @@index([active])
+}
+
+model ShiftTypeRequiredTag {
+  id              String    @id @default(cuid())
+  shiftTypeId     String
+  shiftType       ShiftType @relation(fields: [shiftTypeId], references: [id], onDelete: Cascade)
+  staffTagId      String
+  staffTag        StaffTag  @relation(fields: [staffTagId], references: [id], onDelete: Cascade)
+  requirementType String
+  createdAt       DateTime  @default(now())
+
+  @@unique([shiftTypeId, staffTagId, requirementType])
+  @@index([shiftTypeId])
+  @@index([staffTagId])
+  @@index([requirementType])
 }
 
 model ScheduleAssignment {

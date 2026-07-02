@@ -6,6 +6,7 @@ import { mergeDoctorNameLists } from "@/lib/name-parser";
 import { getDefaultActiveUnit, getOrCreateDefaultUnit } from "@/lib/organizations";
 import { prisma } from "@/lib/prisma";
 import { DOCTOR_TYPE, SCHEDULE_MODE, SCHEDULE_STATUS } from "@/lib/schedule-rules";
+import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
 
@@ -55,8 +56,9 @@ export async function POST(request: Request) {
       String(body.residentNames ?? body.residentsText ?? ""),
       String(body.internNames ?? body.internsText ?? "")
     );
+    const requestedStaffProfileIds = Array.isArray(body.staffProfileIds) ? body.staffProfileIds.map(String).filter(Boolean) : [];
 
-    if (residents.length + interns.length === 0) {
+    if (residents.length + interns.length + requestedStaffProfileIds.length === 0) {
       return NextResponse.json({ message: "请至少输入一名人员" }, { status: 400 });
     }
 
@@ -95,6 +97,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "无权限在其他病区创建排班" }, { status: 403 });
     }
 
+    const staffProfiles = requestedStaffProfileIds.length
+      ? await prisma.staffProfile.findMany({
+          where: { unitId, id: { in: requestedStaffProfileIds }, active: true },
+          include: {
+            tags: {
+              include: { staffTag: { include: { policy: true } } },
+              orderBy: { createdAt: "asc" }
+            }
+          }
+        })
+      : [];
+    const selectedNames = new Set(staffProfiles.map((profile) => profile.displayName));
+    const manualDoctors = [
+      ...residents.filter((name) => !selectedNames.has(name)).map((name) => ({ departmentId, name, doctorType: DOCTOR_TYPE.RESIDENT })),
+      ...interns.filter((name) => !selectedNames.has(name)).map((name) => ({ departmentId, name, doctorType: DOCTOR_TYPE.INTERN }))
+    ];
+    const profileDoctors = staffProfiles.map((profile) => {
+      const tags = profile.tags.map((item) => item.staffTag);
+      const tagSnapshot = buildTagSnapshot(tags);
+      const policySnapshot = resolveEffectivePolicy(tags);
+      return {
+        departmentId,
+        staffProfileId: profile.id,
+        name: profile.displayName,
+        doctorType: DOCTOR_TYPE.RESIDENT,
+        active: profile.active,
+        tagSnapshotJson: tagSnapshot,
+        policySnapshotJson: policySnapshot
+      };
+    });
+
     const weekEndDate = getWeekEndDateKey(weekStartDate);
     const task = await prisma.scheduleTask.create({
       data: {
@@ -108,8 +141,13 @@ export async function POST(request: Request) {
         status: SCHEDULE_STATUS.DRAFT,
         doctors: {
           create: [
-            ...residents.map((name) => ({ departmentId, name, doctorType: DOCTOR_TYPE.RESIDENT })),
-            ...interns.map((name) => ({ departmentId, name, doctorType: DOCTOR_TYPE.INTERN }))
+            ...profileDoctors,
+            ...manualDoctors.map((doctor) => ({
+              ...doctor,
+              active: true,
+              tagSnapshotJson: [],
+              policySnapshotJson: { participatesInScheduling: true, workloadFactor: 1, sourceTagNames: [] }
+            }))
           ]
         }
       },
@@ -121,6 +159,21 @@ export async function POST(request: Request) {
         requirements: true
       }
     });
+
+    if (task.doctors.length > 0) {
+      await prisma.scheduleParticipant.createMany({
+        data: task.doctors.map((doctor) => ({
+          scheduleTaskId: task.id,
+          scheduleDoctorId: doctor.id,
+          staffProfileId: doctor.staffProfileId,
+          displayName: doctor.name,
+          active: doctor.active,
+          tagSnapshotJson: doctor.tagSnapshotJson ?? [],
+          policySnapshotJson: doctor.policySnapshotJson ?? { participatesInScheduling: true, workloadFactor: 1, sourceTagNames: [] }
+        })),
+        skipDuplicates: true
+      });
+    }
 
     await writeAuditLog({
       actorUserId: user.id,
@@ -134,7 +187,9 @@ export async function POST(request: Request) {
         weekStartDate,
         weekEndDate,
         mode,
-        personnelCount: residents.length + interns.length
+        staffProfileCount: staffProfiles.length,
+        manualPersonnelCount: manualDoctors.length,
+        personnelCount: task.doctors.length
       },
       request
     });

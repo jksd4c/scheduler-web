@@ -28,6 +28,7 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
       prisma.scheduleConflict.deleteMany({ where: { scheduleTaskId: task.id } }),
       prisma.doctorUnavailableTime.deleteMany({ where: { scheduleTaskId: task.id } }),
       prisma.scheduleRequirement.deleteMany({ where: { scheduleTaskId: task.id } }),
+      prisma.scheduleParticipant.deleteMany({ where: { scheduleTaskId: task.id } }),
       prisma.scheduleDoctor.deleteMany({ where: { scheduleTaskId: task.id } }),
       prisma.scheduleTask.delete({ where: { id: task.id } })
     ]);

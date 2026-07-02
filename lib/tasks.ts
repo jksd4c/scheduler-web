@@ -13,6 +13,13 @@ export async function getTaskDetail(taskId: string) {
         orderBy: [{ date: "asc" }, { timeSlot: "asc" }]
       },
       requirements: {
+        include: {
+          shiftType: {
+            include: {
+              requiredTags: { include: { staffTag: true } }
+            }
+          }
+        },
         orderBy: [{ date: "asc" }, { timeSlot: "asc" }, { roomNumber: "asc" }]
       },
       assignments: {
@@ -32,10 +39,10 @@ export async function getTaskDetail(taskId: string) {
   const stats = calculateScheduleStats({
     mode: asScheduleMode(task.mode),
     weekStartDate: task.weekStartDate,
-    doctors: task.doctors.map((doctor) => ({
-      ...doctor,
-      doctorType: asDoctorType(doctor.doctorType)
-    })),
+      doctors: task.doctors.map((doctor) => ({
+        ...doctor,
+        doctorType: asDoctorType(doctor.doctorType)
+      })),
     requirements: task.requirements.map((requirement) => ({
       ...requirement,
       timeSlot: asTimeSlot(requirement.timeSlot)
