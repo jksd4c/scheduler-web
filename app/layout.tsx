@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [user, guest] = await Promise.all([getCurrentUser(), getCurrentGuest()]);
-  const homePath = user?.role === USER_ROLE.SUPER_ADMIN ? "/admin" : "/dashboard";
+  const homePath = user?.role === USER_ROLE.SUPER_ADMIN ? "/admin" : user?.role === USER_ROLE.MEMBER ? "/member/feedback" : "/dashboard";
   const orgLabel = user?.unit?.name || user?.department?.name || user?.hospital?.name || "";
 
   return (
@@ -37,12 +37,25 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       </div>
                     </div>
                     <nav className="hidden items-center gap-3 sm:flex">
-                      <Link href={homePath} className="text-slate-600 hover:text-slate-950">
-                        工作台
-                      </Link>
-                      <Link href="/feedback" className="text-slate-600 hover:text-slate-950">
-                        反馈
-                      </Link>
+                      {user.role === USER_ROLE.MEMBER ? (
+                        <>
+                          <Link href="/member/feedback" className="text-slate-600 hover:text-slate-950">
+                            我的反馈
+                          </Link>
+                          <Link href="/member/my-schedule" className="text-slate-600 hover:text-slate-950">
+                            我的排班
+                          </Link>
+                        </>
+                      ) : (
+                        <>
+                          <Link href={homePath} className="text-slate-600 hover:text-slate-950">
+                            工作台
+                          </Link>
+                          <Link href="/feedback" className="text-slate-600 hover:text-slate-950">
+                            反馈
+                          </Link>
+                        </>
+                      )}
                     </nav>
                     <LogoutButton />
                   </>

@@ -3,7 +3,7 @@
 import { CalendarDays, ExternalLink, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { MODE_LABELS, STATUS_LABELS } from "@/lib/schedule-rules";
+import { MODE_LABELS, STATUS_LABELS, TASK_SCHEDULE_MODE_LABELS } from "@/lib/schedule-rules";
 import { toDateKey } from "@/lib/date-utils";
 import type { ApiTaskListItem } from "@/components/schedule-types";
 
@@ -117,7 +117,8 @@ export function TaskList() {
               <tr>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">排班周期</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">病区/小组</th>
-                <th className="border-b border-slate-200 px-4 py-3 font-medium">模式</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">排班模式</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">时段</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">状态</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">人员数</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">已排班</th>
@@ -129,13 +130,13 @@ export function TaskList() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-slate-500" colSpan={9}>
+                  <td className="px-4 py-8 text-center text-slate-500" colSpan={10}>
                     正在加载任务...
                   </td>
                 </tr>
               ) : tasks.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-slate-500" colSpan={9}>
+                  <td className="px-4 py-8 text-center text-slate-500" colSpan={10}>
                     暂无排班任务
                   </td>
                 </tr>
@@ -149,7 +150,8 @@ export function TaskList() {
                       </div>
                     </td>
                     <td className="border-b border-slate-100 px-4 py-3 text-slate-600">{task.unit?.name ?? task.department?.name ?? "-"}</td>
-                    <td className="border-b border-slate-100 px-4 py-3">{MODE_LABELS[task.mode]}</td>
+                    <td className="border-b border-slate-100 px-4 py-3">{TASK_SCHEDULE_MODE_LABELS[task.scheduleMode]}</td>
+                    <td className="border-b border-slate-100 px-4 py-3">{task.scheduleMode === "MEDTECH_ROOM" ? MODE_LABELS[task.mode] : "按班次"}</td>
                     <td className="border-b border-slate-100 px-4 py-3">
                       <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                         {STATUS_LABELS[task.status]}

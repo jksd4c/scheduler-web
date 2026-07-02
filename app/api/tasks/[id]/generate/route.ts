@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
+import { prisma } from "@/lib/prisma";
 import { generateScheduleForTask } from "@/lib/scheduler";
 
 export const runtime = "nodejs";
@@ -12,6 +13,9 @@ export async function POST(request: Request, { params }: { params: { id: string 
   try {
     const { user, task: accessTask } = await requireScheduleTaskAccess(params.id);
     role = user.role;
+    const effectiveFeedbackCount = await prisma.memberFeedback.count({
+      where: { scheduleTaskId: params.id, effective: true, status: { not: "REJECTED" } }
+    });
     const task = await generateScheduleForTask(params.id);
     await writeAuditLog({
       actorUserId: user.id,
@@ -21,6 +25,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
       action: "GENERATE_SCHEDULE",
       targetType: "ScheduleTask",
       targetId: params.id,
+      afterJson: { effectiveFeedbackCount },
       request
     });
     return withApiTiming(NextResponse.json({ task }), { route: "POST /api/tasks/[id]/generate", start, role });

@@ -3,9 +3,11 @@ import { getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
 import {
   MODE_LABELS,
   SLOT_LABELS,
+  TASK_SCHEDULE_MODE,
   TIME_SLOT,
   asDoctorType,
   asScheduleMode,
+  asTaskScheduleMode,
   asTimeSlot,
   getMaxRoomNumberFromRequirements,
   getTimeSlotsForMode,
@@ -34,6 +36,12 @@ function doctorNamesForCell(task: TaskDetail, dateKey: string, timeSlot: TimeSlo
     .join("\u3001");
 }
 
+function requirementLabel(requirement: ReturnType<typeof requirementsToCells>[number], taskScheduleMode: string) {
+  return asTaskScheduleMode(taskScheduleMode) === TASK_SCHEDULE_MODE.MEDTECH_ROOM
+    ? `单元${requirement.roomNumber}`
+    : requirement.shiftType?.name ?? `班次${requirement.roomNumber}`;
+}
+
 function styleWorksheet(sheet: ExcelJS.Worksheet) {
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.getRow(1).font = { bold: true, color: { argb: "FF1F2937" } };
@@ -53,51 +61,75 @@ export async function createScheduleWorkbook(task: TaskDetail) {
   workbook.created = new Date();
 
   const requirementCells = requirementsToCells(task.requirements);
-  const maxRoomNumber = Math.max(1, getMaxRoomNumberFromRequirements(task.requirements));
-  const roomNumbers = Array.from({ length: maxRoomNumber }, (_, index) => index + 1);
-  const roomHeaders = roomNumbers.map((room) => `单元${room}`);
-  const scheduleSheet = workbook.addWorksheet("单元排班表");
-  scheduleSheet.columns =
-    task.mode === "FULL_DAY"
-      ? [
-          { header: "\u65e5\u671f", key: "date", width: 14 },
-          { header: "\u661f\u671f", key: "weekday", width: 10 },
-          ...roomHeaders.map((header, index) => ({ header, key: `room${index + 1}`, width: 26 }))
-        ]
-      : [
-          { header: "\u65e5\u671f", key: "date", width: 14 },
-          { header: "\u661f\u671f", key: "weekday", width: 10 },
-          { header: "\u65f6\u6bb5", key: "timeSlot", width: 10 },
-          ...roomHeaders.map((header, index) => ({ header, key: `room${index + 1}`, width: 26 }))
-        ];
+  const taskScheduleMode = asTaskScheduleMode((task as any).scheduleMode);
+  if (taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM) {
+    const maxRoomNumber = Math.max(1, getMaxRoomNumberFromRequirements(task.requirements));
+    const roomNumbers = Array.from({ length: maxRoomNumber }, (_, index) => index + 1);
+    const roomHeaders = roomNumbers.map((room) => `单元${room}`);
+    const scheduleSheet = workbook.addWorksheet("单元排班表");
+    scheduleSheet.columns =
+      task.mode === "FULL_DAY"
+        ? [
+            { header: "\u65e5\u671f", key: "date", width: 14 },
+            { header: "\u661f\u671f", key: "weekday", width: 10 },
+            ...roomHeaders.map((header, index) => ({ header, key: `room${index + 1}`, width: 26 }))
+          ]
+        : [
+            { header: "\u65e5\u671f", key: "date", width: 14 },
+            { header: "\u661f\u671f", key: "weekday", width: 10 },
+            { header: "\u65f6\u6bb5", key: "timeSlot", width: 10 },
+            ...roomHeaders.map((header, index) => ({ header, key: `room${index + 1}`, width: 26 }))
+          ];
 
-  for (const day of getWeekDates(task.weekStartDate)) {
-    for (const timeSlot of getTimeSlotsForMode(asScheduleMode(task.mode))) {
-      const row: Record<string, string> = {
-        date: day.dateKey,
-        weekday: day.label,
-        timeSlot: SLOT_LABELS[timeSlot]
-      };
-      const slotRequirements = requirementCells.filter(
-        (item) => item.dateKey === day.dateKey && item.timeSlot === timeSlot
-      );
-      if (slotRequirements.length === 0) {
-        row.room1 = "\u672a\u5f00\u653e";
-      } else {
-        for (const roomNumber of roomNumbers) {
-          const requirement = slotRequirements.find((item) => item.roomNumber === roomNumber);
-          if (!requirement) {
-            row[`room${roomNumber}`] = "";
-            continue;
+    for (const day of getWeekDates(task.weekStartDate)) {
+      for (const timeSlot of getTimeSlotsForMode(asScheduleMode(task.mode))) {
+        const row: Record<string, string> = {
+          date: day.dateKey,
+          weekday: day.label,
+          timeSlot: SLOT_LABELS[timeSlot]
+        };
+        const slotRequirements = requirementCells.filter((item) => item.dateKey === day.dateKey && item.timeSlot === timeSlot);
+        if (slotRequirements.length === 0) {
+          row.room1 = "\u672a\u5f00\u653e";
+        } else {
+          for (const roomNumber of roomNumbers) {
+            const requirement = slotRequirements.find((item) => item.roomNumber === roomNumber);
+            if (!requirement) {
+              row[`room${roomNumber}`] = "";
+              continue;
+            }
+            const names = doctorNamesForCell(task, day.dateKey, timeSlot, roomNumber);
+            row[`room${roomNumber}`] = names || `\u672a\u6392\uff08\u9700${requirement.requiredDoctors}\u4eba\uff09`;
           }
-          const names = doctorNamesForCell(task, day.dateKey, timeSlot, roomNumber);
-          row[`room${roomNumber}`] = names || `\u672a\u6392\uff08\u9700${requirement.requiredDoctors}\u4eba\uff09`;
         }
+        scheduleSheet.addRow(row);
       }
+    }
+    styleWorksheet(scheduleSheet);
+  } else {
+    const shiftRequirements = requirementCells.filter((item) => item.shiftTypeId);
+    const shiftColumns = Array.from(new Map(shiftRequirements.map((item) => [item.shiftTypeId!, item])).values());
+    const scheduleSheet = workbook.addWorksheet(taskScheduleMode === TASK_SCHEDULE_MODE.CUSTOM ? "自定义排班表" : "班次排班表");
+    scheduleSheet.columns = [
+      { header: "\u65e5\u671f", key: "date", width: 14 },
+      { header: "\u661f\u671f", key: "weekday", width: 10 },
+      ...shiftColumns.map((requirement, index) => ({ header: requirementLabel(requirement, task.scheduleMode), key: `shift${index + 1}`, width: 28 }))
+    ];
+    for (const day of getWeekDates(task.weekStartDate)) {
+      const row: Record<string, string> = { date: day.dateKey, weekday: day.label };
+      shiftColumns.forEach((column, index) => {
+        const requirement = requirementCells.find((item) => item.dateKey === day.dateKey && item.shiftTypeId === column.shiftTypeId);
+        if (!requirement) {
+          row[`shift${index + 1}`] = "";
+          return;
+        }
+        const names = doctorNamesForCell(task, day.dateKey, requirement.timeSlot, requirement.roomNumber);
+        row[`shift${index + 1}`] = names || `未排（需${requirement.requiredDoctors}人）`;
+      });
       scheduleSheet.addRow(row);
     }
+    styleWorksheet(scheduleSheet);
   }
-  styleWorksheet(scheduleSheet);
 
   const statsSheet = workbook.addWorksheet("人员个人排班统计");
   statsSheet.columns = [
@@ -127,7 +159,13 @@ export async function createScheduleWorkbook(task: TaskDetail) {
       doctorType: DOCTOR_TYPE_LABEL[item.doctorType],
       tags: item.tagNames?.join("、") ?? "",
       details: item.assignments
-        .map((assignment) => `${assignment.date}${assignment.weekdayLabel}${assignment.timeSlotLabel} 单元${assignment.roomNumber}`)
+        .map((assignment) => {
+          const requirement = requirementCells.find(
+            (cell) => cell.dateKey === assignment.date && cell.timeSlot === assignment.timeSlot && cell.roomNumber === assignment.roomNumber
+          );
+          const place = requirement ? requirementLabel(requirement, task.scheduleMode) : `单元${assignment.roomNumber}`;
+          return `${assignment.date}${assignment.weekdayLabel}${taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? assignment.timeSlotLabel : ""} ${place}`;
+        })
         .join("\uff1b")
     });
   }
@@ -154,7 +192,7 @@ export async function createScheduleWorkbook(task: TaskDetail) {
     { header: "\u65e5\u671f", key: "date", width: 14 },
     { header: "\u661f\u671f", key: "weekday", width: 10 },
     { header: "\u65f6\u6bb5", key: "timeSlot", width: 10 },
-    { header: "单元", key: "roomNumber", width: 10 },
+    { header: taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? "单元" : "班次", key: "roomNumber", width: 16 },
     { header: "\u7f3a\u5c11\u4eba\u6570", key: "missingCount", width: 12 },
     { header: "\u7c7b\u578b", key: "conflictType", width: 18 },
     { header: "\u4e25\u91cd\u7a0b\u5ea6", key: "severity", width: 12 },
@@ -165,7 +203,22 @@ export async function createScheduleWorkbook(task: TaskDetail) {
       date: toDateKey(conflict.date),
       weekday: getWeekdayLabel(conflict.weekday),
       timeSlot: SLOT_LABELS[asTimeSlot(conflict.timeSlot)],
-      roomNumber: `单元${conflict.roomNumber}`,
+      roomNumber:
+        taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM
+          ? `单元${conflict.roomNumber}`
+          : requirementLabel(
+              requirementCells.find(
+                (cell) => cell.dateKey === toDateKey(conflict.date) && cell.timeSlot === asTimeSlot(conflict.timeSlot) && cell.roomNumber === conflict.roomNumber
+              ) ?? {
+                date: conflict.date,
+                dateKey: toDateKey(conflict.date),
+                weekday: conflict.weekday as any,
+                roomNumber: conflict.roomNumber,
+                timeSlot: asTimeSlot(conflict.timeSlot),
+                requiredDoctors: 0
+              },
+              task.scheduleMode
+            ),
       missingCount: conflict.missingCount ?? 0,
       conflictType: conflict.conflictType,
       severity: conflict.severity,

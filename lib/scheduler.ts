@@ -12,7 +12,9 @@ import {
   SCHEDULE_MODE,
   SCHEDULE_STATUS,
   SLOT_LABELS,
+  TASK_SCHEDULE_MODE,
   TIME_SLOT,
+  asTaskScheduleMode,
   type ConflictSeverityValue,
   type RequiredScheduleCell,
   type ScheduleModeValue,
@@ -21,9 +23,9 @@ import {
 import {
   parseEffectivePolicy,
   parseTagSnapshot,
+  STAFF_SCHEDULING_MODE,
   SHIFT_TAG_REQUIREMENT,
-  SHIFT_TYPE_CATEGORY,
-  type EffectiveStaffPolicy
+  SHIFT_TYPE_CATEGORY
 } from "@/lib/staff-policy";
 import { getTaskDetail } from "@/lib/tasks";
 
@@ -68,6 +70,8 @@ type InMemoryConflict = {
   description: string;
   severity: ConflictSeverityValue;
 };
+
+const GLOBAL_MAX_CONSECUTIVE_WORK_DAYS = 5;
 
 function slotKey(dateKey: string, timeSlot: TimeSlotValue) {
   return `${dateKey}:${timeSlot}`;
@@ -171,7 +175,13 @@ function scoreDoctor(input: {
   return score;
 }
 
-function createConflict(cell: RequiredScheduleCell, taskId: string, missingCount: number, description?: string) {
+function requirementLabel(cell: RequiredScheduleCell, scheduleMode?: string | null) {
+  return asTaskScheduleMode(scheduleMode) === TASK_SCHEDULE_MODE.MEDTECH_ROOM
+    ? `单元${cell.roomNumber}`
+    : `班次${cell.shiftType?.name ?? cell.shiftTypeId ?? cell.roomNumber}`;
+}
+
+function createConflict(cell: RequiredScheduleCell, taskId: string, missingCount: number, scheduleMode?: string | null, description?: string) {
   return {
     scheduleTaskId: taskId,
     date: dateFromKey(cell.dateKey),
@@ -182,7 +192,7 @@ function createConflict(cell: RequiredScheduleCell, taskId: string, missingCount
     missingCount,
     description:
       description ??
-      `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} unit ${cell.roomNumber} missing ${missingCount}: insufficient eligible staff.`,
+      `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} ${requirementLabel(cell, scheduleMode)} 缺少 ${missingCount} 人：可用人员不足。`,
     severity: CONFLICT_SEVERITY.ERROR
   } satisfies InMemoryConflict;
 }
@@ -210,6 +220,7 @@ export function checkIdentityEligibility(input: {
   const tagIds = new Set(parseTagSnapshot(doctor.tagSnapshotJson).map((tag) => tag.id));
   const policy = parseEffectivePolicy(doctor.policySnapshotJson);
   if (!policy.participatesInScheduling) return { ok: false, reason: "policy excludes auto scheduling" };
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.EXCLUDED) return { ok: false, reason: "identity excludes auto scheduling" };
 
   const rules = cell.shiftType?.requiredTags ?? [];
   const required = rules.filter((rule) => rule.requirementType === SHIFT_TAG_REQUIREMENT.REQUIRED);
@@ -226,54 +237,30 @@ export function checkIdentityEligibility(input: {
     return { ok: false, reason: "outside allowed tag scope" };
   }
 
-  const category = cell.shiftType?.category ?? "";
-  const isNightShift = Boolean(cell.shiftType?.isNight) || category === SHIFT_TYPE_CATEGORY.NIGHT;
-  const policyBlock = policyBlocksShift(policy, category, isNightShift, cell.weekday);
-  if (policyBlock) return { ok: false, reason: policyBlock };
-
   const doctorState = state.get(doctor.id);
   if (!doctorState) return { ok: false, reason: "staff state missing" };
-  if (policy.maxShiftsPerWeek != null && doctorState.total >= policy.maxShiftsPerWeek) {
-    return { ok: false, reason: `max weekly shifts reached: ${policy.maxShiftsPerWeek}` };
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.FIXED_TARGET && policy.targetShiftsPerPeriod != null && doctorState.total >= policy.targetShiftsPerPeriod) {
+    return { ok: false, reason: `identity target reached: ${policy.targetShiftsPerPeriod}` };
   }
-  if (policy.maxShiftsPerMonth != null && doctorState.total >= policy.maxShiftsPerMonth) {
-    return { ok: false, reason: `max monthly shifts reached: ${policy.maxShiftsPerMonth}` };
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.MAX_LIMIT && policy.maxShiftsPerPeriod != null && doctorState.total >= policy.maxShiftsPerPeriod) {
+    return { ok: false, reason: `identity max reached: ${policy.maxShiftsPerPeriod}` };
   }
-  if (policy.maxWorkDaysPerWeek != null && !doctorState.workedDates.has(cell.dateKey) && doctorState.workedDates.size >= policy.maxWorkDaysPerWeek) {
-    return { ok: false, reason: `max weekly work days reached: ${policy.maxWorkDaysPerWeek}` };
+  if (policy.maxShiftsPerPeriod != null && doctorState.total >= policy.maxShiftsPerPeriod) {
+    return { ok: false, reason: `identity max reached: ${policy.maxShiftsPerPeriod}` };
   }
-  if (isNightShift && policy.maxNightShiftsPerMonth != null && doctorState.night >= policy.maxNightShiftsPerMonth) {
-    return { ok: false, reason: `max monthly night shifts reached: ${policy.maxNightShiftsPerMonth}` };
+  const category = cell.shiftType?.category ?? "";
+  const isNightShift = Boolean(cell.shiftType?.isNight) || category === SHIFT_TYPE_CATEGORY.NIGHT;
+  if (wouldExceedConsecutiveLimit(doctorState.workedDates, cell.dateKey, GLOBAL_MAX_CONSECUTIVE_WORK_DAYS)) {
+    return { ok: false, reason: `global max consecutive work days would be exceeded: ${GLOBAL_MAX_CONSECUTIVE_WORK_DAYS}` };
   }
-  if (isWeekend(cell.weekday) && policy.maxWeekendShiftsPerMonth != null && doctorState.weekend >= policy.maxWeekendShiftsPerMonth) {
-    return { ok: false, reason: `max monthly weekend shifts reached: ${policy.maxWeekendShiftsPerMonth}` };
+  if (isNightShift && doctorState.nightDates.has(toDateKey(addDays(cell.dateKey, -1)))) {
+    return { ok: false, reason: "global rest rule forbids consecutive night shifts" };
   }
-  if (wouldExceedConsecutiveLimit(doctorState.workedDates, cell.dateKey, policy.maxConsecutiveWorkDays)) {
-    return { ok: false, reason: `max consecutive work days would be exceeded: ${policy.maxConsecutiveWorkDays}` };
-  }
-  if (isNightShift && policy.allowConsecutiveNightShifts === false && doctorState.nightDates.has(toDateKey(addDays(cell.dateKey, -1)))) {
-    return { ok: false, reason: "consecutive night shifts forbidden" };
-  }
-  if (!isNightShift && policy.allowDayAfterNightShift === false && doctorState.nightDates.has(toDateKey(addDays(cell.dateKey, -1)))) {
-    return { ok: false, reason: "day shift after night shift forbidden" };
-  }
-  if (doctorState.workedDates.has(cell.dateKey) && policy.allowDayAndNightSameDay === false) {
-    return { ok: false, reason: "day and night same day forbidden" };
+  if (!isNightShift && doctorState.nightDates.has(toDateKey(addDays(cell.dateKey, -1)))) {
+    return { ok: false, reason: "global rest rule forbids day shift after night shift" };
   }
 
   return { ok: true, reason: "" };
-}
-
-function policyBlocksShift(policy: EffectiveStaffPolicy, category: string, isNightShift: boolean, weekday: number) {
-  if (isNightShift && policy.canWorkNightShift === false) return "policy forbids night shift";
-  if (!isNightShift && policy.canWorkDayShift === false) return "policy forbids day shift";
-  if (isWeekend(weekday) && policy.canWorkWeekend === false) return "policy forbids weekend shift";
-  if (category === SHIFT_TYPE_CATEGORY.FIRST_LINE && policy.canWorkFirstLine === false) return "policy forbids first-line shift";
-  if (category === SHIFT_TYPE_CATEGORY.SECOND_LINE && policy.canWorkSecondLine === false) return "policy forbids second-line shift";
-  if (category === SHIFT_TYPE_CATEGORY.EMERGENCY && policy.canWorkEmergency === false) return "policy forbids emergency shift";
-  if (category === SHIFT_TYPE_CATEGORY.ON_CALL && policy.canWorkOnCall === false) return "policy forbids on-call shift";
-  if (category === SHIFT_TYPE_CATEGORY.BACKUP && policy.canWorkBackup === false) return "policy forbids backup shift";
-  return "";
 }
 
 function wouldExceedConsecutiveLimit(workedDates: Set<string>, dateKey: string, maxDays: number | null | undefined) {
@@ -328,6 +315,7 @@ export async function generateScheduleForTask(taskId: string) {
   if (requiredCells.length === 0) {
     throw new Error("Please configure at least one enabled scheduling requirement before generating.");
   }
+  const effectiveUnavailableTimes = [...task.unavailableTimes, ...(await loadEffectiveMemberFeedbackUnavailableTimes(task.id, task.doctors))];
 
   const doctorState = createInitialDoctorState(task.doctors);
   const takenBySlot = new Map<string, Set<string>>();
@@ -342,7 +330,7 @@ export async function generateScheduleForTask(taskId: string) {
       roomNumber: lockedAssignment.roomNumber
     });
     recordState(doctorState, takenBySlot, { ...lockedAssignment, timeSlot: lockedTimeSlot }, lockedCell);
-    if (isDoctorUnavailable(task.unavailableTimes, lockedAssignment.doctorId, lockedAssignment.date, lockedTimeSlot)) {
+    if (isDoctorUnavailable(effectiveUnavailableTimes, lockedAssignment.doctorId, lockedAssignment.date, lockedTimeSlot)) {
       const dateKey = toDateKey(lockedAssignment.date);
       conflicts.push({
         scheduleTaskId: task.id,
@@ -352,7 +340,7 @@ export async function generateScheduleForTask(taskId: string) {
         timeSlot: lockedTimeSlot,
         conflictType: "LOCKED_UNAVAILABLE",
         missingCount: null,
-        description: `${dateKey} ${getWeekdayLabel(lockedAssignment.weekday)} ${SLOT_LABELS[lockedTimeSlot]} unit ${lockedAssignment.roomNumber}: locked staff is unavailable.`,
+        description: `${dateKey} ${getWeekdayLabel(lockedAssignment.weekday)} ${SLOT_LABELS[lockedTimeSlot]}：锁定人员不可用。`,
         severity: CONFLICT_SEVERITY.ERROR
       });
     }
@@ -375,7 +363,7 @@ export async function generateScheduleForTask(taskId: string) {
         timeSlot: cell.timeSlot,
         conflictType: "OVERFILLED",
         missingCount: null,
-        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} unit ${cell.roomNumber}: locked count exceeds requirement.`,
+        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} ${requirementLabel(cell, task.scheduleMode)}：锁定人数超过需求。`,
         severity: CONFLICT_SEVERITY.WARNING
       });
       continue;
@@ -387,7 +375,7 @@ export async function generateScheduleForTask(taskId: string) {
       const identityRejections: string[] = [];
       const candidates = task.doctors
         .filter((doctor) => !alreadyTaken.has(doctor.id))
-        .filter((doctor) => !isDoctorUnavailable(task.unavailableTimes, doctor.id, cell.date, cell.timeSlot))
+        .filter((doctor) => !isDoctorUnavailable(effectiveUnavailableTimes, doctor.id, cell.date, cell.timeSlot))
         .filter((doctor) => {
           const result = checkIdentityEligibility({ doctor, cell, state: doctorState });
           if (!result.ok) identityRejections.push(result.reason);
@@ -413,7 +401,8 @@ export async function generateScheduleForTask(taskId: string) {
             cell,
             task.id,
             missingCount,
-            `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} unit ${cell.roomNumber} missing ${missingCount}: insufficient eligible staff${reason ? ` (${reason})` : ""}.`
+            task.scheduleMode,
+            `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} ${requirementLabel(cell, task.scheduleMode)} 缺少 ${missingCount} 人：可用人员不足${reason ? `（${reason}）` : ""}。`
           )
         );
         break;
@@ -451,6 +440,35 @@ export async function generateScheduleForTask(taskId: string) {
   return getTaskDetail(task.id);
 }
 
+async function loadEffectiveMemberFeedbackUnavailableTimes(taskId: string, doctors: ScheduleDoctor[]) {
+  const feedback = await prisma.memberFeedback.findMany({
+    where: {
+      scheduleTaskId: taskId,
+      effective: true,
+      status: { not: "REJECTED" }
+    },
+    include: { unavailableTimes: true }
+  });
+  if (!feedback.length) return [];
+  const rosterIds = Array.from(new Set(feedback.map((item) => item.rosterEntryId).filter(Boolean))) as string[];
+  const rosterEntries = rosterIds.length
+    ? await prisma.rosterEntry.findMany({ where: { id: { in: rosterIds }, status: "CONFIRMED", includeInScheduling: true } })
+    : [];
+  const rosterById = new Map(rosterEntries.map((item) => [item.id, item]));
+  const doctorByStaffProfileId = new Map(doctors.filter((doctor) => doctor.staffProfileId).map((doctor) => [doctor.staffProfileId!, doctor]));
+  const records: Array<{ doctorId: string; date: Date; timeSlot: string; reason?: string | null }> = [];
+  for (const item of feedback) {
+    const roster = item.rosterEntryId ? rosterById.get(item.rosterEntryId) : null;
+    if (!roster?.staffProfileId) continue;
+    const doctor = doctorByStaffProfileId.get(roster.staffProfileId);
+    if (!doctor) continue;
+    for (const unavailable of item.unavailableTimes) {
+      records.push({ doctorId: doctor.id, date: unavailable.date, timeSlot: unavailable.timeSlot, reason: unavailable.reason });
+    }
+  }
+  return records;
+}
+
 export async function rebuildConflictsForTask(taskId: string) {
   const task = await prisma.scheduleTask.findUnique({
     where: { id: taskId },
@@ -481,7 +499,7 @@ export async function rebuildConflictsForTask(taskId: string) {
         assignment.roomNumber === cell.roomNumber
     ).length;
 
-    if (count < cell.requiredDoctors) conflicts.push(createConflict(cell, task.id, cell.requiredDoctors - count));
+    if (count < cell.requiredDoctors) conflicts.push(createConflict(cell, task.id, cell.requiredDoctors - count, task.scheduleMode));
     if (count > cell.requiredDoctors) {
       conflicts.push({
         scheduleTaskId: task.id,
@@ -491,7 +509,7 @@ export async function rebuildConflictsForTask(taskId: string) {
         timeSlot: cell.timeSlot,
         conflictType: "OVERFILLED",
         missingCount: null,
-        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} unit ${cell.roomNumber}: over requirement.`,
+        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} ${requirementLabel(cell, task.scheduleMode)}：人数超过需求。`,
         severity: CONFLICT_SEVERITY.WARNING
       });
     }
@@ -512,7 +530,7 @@ export async function rebuildConflictsForTask(taskId: string) {
         timeSlot: assignmentTimeSlot,
         conflictType: "CLOSED_UNIT",
         missingCount: null,
-        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} unit ${assignment.roomNumber}: not enabled by current rules.`,
+        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)}：当前规则未启用对应需求。`,
         severity: CONFLICT_SEVERITY.ERROR
       });
     }
@@ -526,7 +544,7 @@ export async function rebuildConflictsForTask(taskId: string) {
         timeSlot: assignmentTimeSlot,
         conflictType: "UNAVAILABLE_DOCTOR",
         missingCount: null,
-        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} ${SLOT_LABELS[assignmentTimeSlot]} unit ${assignment.roomNumber}: assigned staff is unavailable.`,
+        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} ${SLOT_LABELS[assignmentTimeSlot]}：已排人员不可用。`,
         severity: CONFLICT_SEVERITY.ERROR
       });
     }

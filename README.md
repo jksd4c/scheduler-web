@@ -1,10 +1,10 @@
-# 医院心电图室排班系统 Web 版
+# 公平排班 Web 版
 
-这是从本地 EXE 版独立复制出来的 Web 版工作目录，目标是升级为多科室、多账号、多权限系统，并部署到 Vercel + Supabase PostgreSQL。
+“公平排班 v0.1 免费测试服”是面向医院科室、病区和小组的 Web 排班系统，支持多账号、多权限、多科室/病区隔离、访客查看、人员身份策略、班次资格、人员池、预录名单、加入码、成员反馈和自动排班。
 
-当前状态：第一阶段基础分离完成。现有排班页面和核心排班逻辑已保留，Electron / EXE 打包相关文件、脚本和依赖已移除。数据库仍会在第二阶段从 SQLite Prisma schema 改为 PostgreSQL schema。
+本目录是独立 Web 版工程，不依赖原 EXE 本地版目录。
 
-## 技术方向
+## 技术栈
 
 - Next.js App Router
 - React + TypeScript
@@ -15,8 +15,6 @@
 - ExcelJS 导出 Excel
 
 ## 本地运行
-
-第一阶段仍保留原排班功能和现有 Prisma schema。第二阶段会正式切换到 PostgreSQL、增加多科室和账号权限表。
 
 ```bash
 npm install
@@ -54,30 +52,39 @@ INITIAL_DEPARTMENT_ADMIN_PASSWORD=
 npm run dev        # 启动 Next.js 开发服务器
 npm run build      # 生成 Prisma Client 并构建 Next.js
 npm run start      # 启动生产构建
+npm run smoke      # 轻量冒烟测试
 npm run db:migrate # 本地开发 migration
 npm run db:deploy  # 线上 migration deploy
 npm run db:studio  # 打开 Prisma Studio
 ```
 
-## 第一阶段清理结果
+## 主要功能
 
-- 已删除 `electron/` 目录。
-- 已移除 Electron preload 类型声明。
-- 已移除 `electron`、`electron-builder`、`concurrently`、`wait-on` 等桌面打包依赖。
-- 已移除 `electron:dev`、`build:electron`、`dist` 等 EXE 打包脚本。
-- 已移除 package.json 中的 electron-builder 配置。
-- 已移除任务详情页里的本机 SQLite 备份/导入按钮。
-- 已删除复制过来的 `prisma/dev.db`。
-- 已保留页面底部 `医院心电图室周排班 · by-jks`。
+- 登录与权限：`SUPER_ADMIN`、`SCHEDULER_ADMIN`、`DEPARTMENT_ADMIN`、`MEMBER`、访客只读会话。
+- 科室/病区隔离：科室管理员只能管理自己的 Unit，服务端 API 做权限校验。
+- 排班模式：病房白班/夜班、医技科室按单元/房间、自定义排班。
+- 排班规则：按任务独立保存规则，自动排班从数据库规则读取需求。
+- 身份策略：支持正常参与、减少排班、固定目标、最多班次、不参与自动排班。
+- 班次资格：通过 ShiftType 的 required / forbidden / allowed 身份标签控制。
+- 人员工作流：固定人员池、轮转人员池、预录名单、加入码、手机号绑定、管理员确认。
+- 成员反馈：成员可提交硬性不可排和留言，只有身份确认且生效的反馈会进入排班算法。
+- 排班前检查：任务详情可进入排班前检查页，查看名单、匹配、反馈和异常状态。
+- 导出：Excel 导出排班表、统计和冲突报告。
 
-## 后续阶段
+## 部署
 
-第二阶段将执行：
+Vercel 环境变量需要配置到 Production / Preview / Development：
 
-- Prisma datasource 从 SQLite 改为 PostgreSQL。
-- 新增 `Department`、`User`、`Session`、`DepartmentAccessCode`、`GuestSession`。
-- 给排班相关表增加 `departmentId`。
-- 创建 PostgreSQL migration。
-- 增加安全 seed 脚本，从环境变量读取初始账号和密码，不在代码中硬编码真实密码。
+- `DATABASE_URL`
+- `DIRECT_URL`
+- `AUTH_SECRET`
+- `APP_URL`
+- `INITIAL_SUPER_ADMIN_USERNAME`
+- `INITIAL_SUPER_ADMIN_PASSWORD`
+- `INITIAL_DEPARTMENT_NAME`
+- `INITIAL_DEPARTMENT_ADMIN_USERNAME`
+- `INITIAL_DEPARTMENT_ADMIN_PASSWORD`
 
-第三阶段及以后将加入登录、权限校验、管理员后台、科室后台、访客入口和 Vercel 部署说明。
+正式部署前请确认 `.env.local` 未被 Git 跟踪，且真实密钥没有写入源码。
+
+页面底部会显示 `公平排班 v0.1 免费测试服 · by: jks`。

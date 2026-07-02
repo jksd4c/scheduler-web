@@ -22,6 +22,8 @@ import {
   MODE_LABELS,
   SLOT_LABELS,
   STATUS_LABELS,
+  TASK_SCHEDULE_MODE_LABELS,
+  TASK_SCHEDULE_MODE,
   TIME_SLOT,
   clampRequiredDoctors,
   clampRoomCount,
@@ -32,7 +34,9 @@ import {
   DOCTOR_TYPE_LABEL,
   type ApiAssignment,
   type ApiDoctor,
+  type ApiRequirement,
   type ApiTaskDetail,
+  type TaskScheduleMode,
   type TimeSlot
 } from "@/components/schedule-types";
 
@@ -48,6 +52,7 @@ type RequirementDayDraft = {
   afternoon: RequirementSlotDraft;
 };
 type RequirementDraft = Record<string, RequirementDayDraft>;
+type ShiftRequirementDraft = Record<string, Record<string, number>>;
 type ShiftTypeOption = { id: string; name: string; category: string; isNight: boolean; active: boolean };
 
 const TABS: Array<{ id: TabId; label: string; Icon: LucideIcon }> = [
@@ -126,6 +131,22 @@ function buildRequirementDraft(task: ApiTaskDetail): RequirementDraft {
   return draft;
 }
 
+function buildShiftRequirementDraft(task: ApiTaskDetail, shiftTypes: ShiftTypeOption[]): ShiftRequirementDraft {
+  const draft: ShiftRequirementDraft = {};
+  for (const day of getWeekDates(task.weekStartDate)) {
+    draft[day.dateKey] = {};
+    for (const shiftType of shiftTypes) {
+      draft[day.dateKey][shiftType.id] = 0;
+    }
+  }
+  for (const requirement of task.requirements) {
+    const dateKey = toDateKey(requirement.date);
+    if (!requirement.enabled || !requirement.shiftTypeId || !draft[dateKey]) continue;
+    draft[dateKey][requirement.shiftTypeId] = clampRoomCount(requirement.requiredDoctors);
+  }
+  return draft;
+}
+
 function expandRequirementDraft(task: ApiTaskDetail, draft: RequirementDraft) {
   const records: Array<{
     date: string;
@@ -165,8 +186,41 @@ function expandRequirementDraft(task: ApiTaskDetail, draft: RequirementDraft) {
   return records;
 }
 
+function expandShiftRequirementDraft(task: ApiTaskDetail, draft: ShiftRequirementDraft, shiftTypes: ShiftTypeOption[]) {
+  const activeShiftTypes = shiftTypes.filter((item) => item.active);
+  return getWeekDates(task.weekStartDate).flatMap((day) =>
+    activeShiftTypes
+      .map((shiftType, index) => {
+        const requiredDoctors = clampRoomCount(Number(draft[day.dateKey]?.[shiftType.id] ?? 0));
+        if (requiredDoctors <= 0) return null;
+        return {
+          date: day.dateKey,
+          weekday: day.weekday,
+          timeSlot: TIME_SLOT.FULL_DAY as TimeSlot,
+          shiftTypeId: shiftType.id,
+          enabled: true,
+          roomNumber: index + 1,
+          requiredDoctors
+        };
+      })
+      .filter(Boolean)
+  ) as Array<{
+    date: string;
+    weekday: number;
+    timeSlot: TimeSlot;
+    shiftTypeId?: string;
+    enabled: boolean;
+    roomNumber: number;
+    requiredDoctors: number;
+  }>;
+}
+
 function doctorLabel(doctor: ApiDoctor) {
   return `${doctor.name}（${DOCTOR_TYPE_LABEL[doctor.doctorType]}）`;
+}
+
+function currentTaskMode(value: unknown): TaskScheduleMode {
+  return value === TASK_SCHEDULE_MODE.WARD_SHIFT || value === TASK_SCHEDULE_MODE.CUSTOM ? value : TASK_SCHEDULE_MODE.MEDTECH_ROOM;
 }
 
 export function TaskDetailClient({ taskId }: { taskId: string }) {
@@ -177,6 +231,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [requirementDraft, setRequirementDraft] = useState<RequirementDraft>({});
+  const [shiftRequirementDraft, setShiftRequirementDraft] = useState<ShiftRequirementDraft>({});
   const [shiftTypes, setShiftTypes] = useState<ShiftTypeOption[]>([]);
   const [unavailableDraft, setUnavailableDraft] = useState<UnavailableDraft>({});
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
@@ -210,13 +265,16 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   useEffect(() => {
     if (!task) return;
     setRequirementDraft(buildRequirementDraft(task));
+    setShiftRequirementDraft(buildShiftRequirementDraft(task, shiftTypes));
     const { draft, notes } = buildUnavailableDraft(task);
     setUnavailableDraft(draft);
     setNoteDraft(notes);
-  }, [task]);
+  }, [task, shiftTypes]);
 
   const weekDays = useMemo(() => (task ? getWeekDates(task.weekStartDate) : []), [task]);
   const requirementCells = useMemo(() => (task ? requirementsToCells(task.requirements) : []), [task]);
+  const activeShiftTypes = useMemo(() => shiftTypes.filter((item) => item.active), [shiftTypes]);
+  const taskScheduleMode = currentTaskMode(task?.scheduleMode);
 
   function assignmentsFor(dateKey: string, timeSlot: TimeSlot, roomNumber: number) {
     return (
@@ -306,7 +364,12 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
       const response = await fetch(`/api/tasks/${task.id}/requirements`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ records: expandRequirementDraft(task, requirementDraft) })
+        body: JSON.stringify({
+          records:
+            currentTaskMode(task.scheduleMode) === TASK_SCHEDULE_MODE.MEDTECH_ROOM
+              ? expandRequirementDraft(task, requirementDraft)
+              : expandShiftRequirementDraft(task, shiftRequirementDraft, activeShiftTypes)
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message ?? "保存排班规则失败");
@@ -555,7 +618,148 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     );
   }
 
+  function setShiftRequirement(dateKey: string, shiftTypeId: string, value: number) {
+    const count = Math.max(0, Math.min(50, Math.floor(Number.isFinite(value) ? value : 0)));
+    setShiftRequirementDraft((previous) => ({
+      ...previous,
+      [dateKey]: {
+        ...(previous[dateKey] ?? {}),
+        [shiftTypeId]: count
+      }
+    }));
+  }
+
+  function fillShiftRequirements(target: "workday" | "weekend", value: number) {
+    const count = Math.max(0, Math.min(50, Math.floor(Number.isFinite(value) ? value : 0)));
+    setShiftRequirementDraft((previous) => {
+      const next: ShiftRequirementDraft = { ...previous };
+      for (const day of weekDays) {
+        const isWeekendDay = day.weekday === 6 || day.weekday === 7;
+        if ((target === "weekend" && !isWeekendDay) || (target === "workday" && isWeekendDay)) continue;
+        next[day.dateKey] = { ...(next[day.dateKey] ?? {}) };
+        for (const shiftType of activeShiftTypes) {
+          next[day.dateKey][shiftType.id] = count;
+        }
+      }
+      return next;
+    });
+  }
+
+  function copyPreviousShiftDay(dateKey: string) {
+    const index = weekDays.findIndex((day) => day.dateKey === dateKey);
+    if (index <= 0) return;
+    const previousDateKey = weekDays[index - 1].dateKey;
+    setShiftRequirementDraft((previous) => ({
+      ...previous,
+      [dateKey]: { ...(previous[previousDateKey] ?? {}) }
+    }));
+  }
+
+  function renderShiftRequirementControls() {
+    const isCustom = taskScheduleMode === TASK_SCHEDULE_MODE.CUSTOM;
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-950">{isCustom ? "自定义排班规则" : "病房白班/夜班规则"}</h3>
+            <p className="text-sm text-slate-600">按班次设置每天所需人数，例如白班、夜班、一线班、二线班等。班次资格要求请到“班次身份要求”中维护。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => fillShiftRequirements("workday", 1)} className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              工作日填 1
+            </button>
+            <button type="button" onClick={() => fillShiftRequirements("weekend", 1)} className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              周末填 1
+            </button>
+            <button
+              onClick={() => setShiftRequirementDraft(buildShiftRequirementDraft(currentTask, activeShiftTypes.map((item) => ({ ...item, active: true }))))}
+              className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              恢复当前
+            </button>
+            <button
+              onClick={() => {
+                const next: ShiftRequirementDraft = {};
+                for (const day of weekDays) {
+                  next[day.dateKey] = {};
+                  for (const shiftType of activeShiftTypes) next[day.dateKey][shiftType.id] = 0;
+                }
+                setShiftRequirementDraft(next);
+              }}
+              className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              清空规则
+            </button>
+            <button
+              onClick={() => void saveRequirements()}
+              disabled={busy === "save-requirements" || activeShiftTypes.length === 0}
+              className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:bg-slate-300"
+            >
+              <Save size={16} />
+              {busy === "save-requirements" ? "正在保存..." : "保存规则"}
+            </button>
+          </div>
+        </div>
+
+        {activeShiftTypes.length === 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            暂无启用班次。请先到“班次身份要求”新增白班、夜班、一线班等班次。
+          </div>
+        ) : null}
+
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
+          <div className="table-scroll">
+            <table className="min-w-[860px] w-full border-collapse text-sm">
+              <thead className="bg-slate-50 text-left text-slate-600">
+                <tr>
+                  <th className="border-b border-slate-200 px-3 py-3 font-medium">星期</th>
+                  <th className="border-b border-slate-200 px-3 py-3 font-medium">日期</th>
+                  {activeShiftTypes.map((shiftType) => (
+                    <th key={shiftType.id} className="border-b border-slate-200 px-3 py-3 font-medium">
+                      {shiftType.name}
+                      {shiftType.isNight ? <span className="ml-1 rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">夜班</span> : null}
+                    </th>
+                  ))}
+                  <th className="border-b border-slate-200 px-3 py-3 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weekDays.map((day) => (
+                  <tr key={day.dateKey}>
+                    <td className="border-b border-slate-100 px-3 py-3 font-medium text-slate-900">{day.label}</td>
+                    <td className="border-b border-slate-100 px-3 py-3 text-slate-600">{day.dateKey}</td>
+                    {activeShiftTypes.map((shiftType) => (
+                      <td key={shiftType.id} className="border-b border-slate-100 px-3 py-3">
+                        <input
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={shiftRequirementDraft[day.dateKey]?.[shiftType.id] ?? 0}
+                          onChange={(event) => setShiftRequirement(day.dateKey, shiftType.id, Number(event.target.value))}
+                          className="focus-ring w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </td>
+                    ))}
+                    <td className="border-b border-slate-100 px-3 py-3">
+                      <button type="button" onClick={() => copyPreviousShiftDay(day.dateKey)} disabled={weekDays[0]?.dateKey === day.dateKey} className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+                        复制上一日
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderRequirementControls() {
+    if (taskScheduleMode !== TASK_SCHEDULE_MODE.MEDTECH_ROOM) {
+      return renderShiftRequirementControls();
+    }
+
     const renderSlotControls = (dateKey: string, slotName: keyof RequirementDayDraft, label?: string) => {
       const value = requirementDraft[dateKey]?.[slotName] ?? createClosedSlot();
       return (
@@ -610,7 +814,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold text-slate-950">排班规则设置</h3>
-            <p className="text-sm text-slate-600">单元数量 0-20；每单元人数 1-5。保存规则会清空旧排班结果。</p>
+            <p className="text-sm text-slate-600">医技科室按房间/检查室/窗口排班：单元数量 0-20；每单元人数 1-5。保存规则会清空旧排班结果。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -737,6 +941,82 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     );
   }
 
+  function shiftLabelForRequirement(requirement?: { shiftType?: { name?: string | null } | null; shiftTypeId?: string | null } | null) {
+    return requirement?.shiftType?.name ?? (requirement?.shiftTypeId ? "未命名班次" : "班次");
+  }
+
+  function renderShiftTable(interactive = false) {
+    const configuredShiftTypes = activeShiftTypes.filter((shiftType) =>
+      requirementCells.some((cell) => cell.shiftTypeId === shiftType.id)
+    );
+    const columns = configuredShiftTypes.length ? configuredShiftTypes : activeShiftTypes;
+
+    if (!columns.length) {
+      return <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500">暂无班次规则，请先在规则页设置每天所需人数。</div>;
+    }
+
+    return (
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
+        <div className="table-scroll">
+          <table className="min-w-[860px] w-full border-collapse text-sm">
+            <thead className="bg-slate-50 text-left text-slate-600">
+              <tr>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">日期</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">星期</th>
+                {columns.map((shiftType) => {
+                  const sample = requirementCells.find((cell) => cell.shiftTypeId === shiftType.id);
+                  return (
+                    <th key={shiftType.id} className="border-b border-slate-200 px-3 py-3 font-medium">
+                      {shiftType.name}
+                      {sample ? <span className="ml-1 text-xs font-normal text-slate-400">/需{sample.requiredDoctors}人</span> : null}
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {weekDays.map((day) => (
+                <tr key={day.dateKey} className="align-top">
+                  <td className="border-b border-slate-100 px-3 py-3 font-medium text-slate-900">{day.dateKey}</td>
+                  <td className="border-b border-slate-100 px-3 py-3 text-slate-600">{day.label}</td>
+                  {columns.map((shiftType) => {
+                    const requirement = requirementCells.find((cell) => cell.dateKey === day.dateKey && cell.shiftTypeId === shiftType.id);
+                    return (
+                      <td key={shiftType.id} className="border-b border-slate-100 px-3 py-3">
+                        {requirement ? (
+                          interactive
+                            ? renderManualCell(day.dateKey, day.weekday, TIME_SLOT.FULL_DAY, requirement.roomNumber, requirement.requiredDoctors)
+                            : renderStaticCell(day.dateKey, TIME_SLOT.FULL_DAY, requirement.roomNumber, requirement.requiredDoctors)
+                        ) : (
+                          <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-500">未设置</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderScheduleGrid(interactive = false) {
+    return taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? renderRoomTable(interactive) : renderShiftTable(interactive);
+  }
+
+  function requirementForAssignmentSummary(assignment: { date: string; timeSlot: TimeSlot; roomNumber: number }) {
+    return requirementCells.find(
+      (cell) => cell.dateKey === assignment.date && cell.timeSlot === assignment.timeSlot && cell.roomNumber === assignment.roomNumber
+    );
+  }
+
+  function assignmentPlaceLabel(assignment: { date: string; timeSlot: TimeSlot; roomNumber: number }) {
+    if (taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM) return `单元${assignment.roomNumber}`;
+    return shiftLabelForRequirement(requirementForAssignmentSummary(assignment));
+  }
+
   function renderStatsOverview() {
     const items = [
       ["应排班次数", stats.overall.expectedAssignments],
@@ -820,7 +1100,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           </span>
         </div>
         {currentTask.conflicts.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-600">暂无未排满单元或不可用冲突。</div>
+          <div className="px-4 py-6 text-sm text-slate-600">暂无未排满需求或不可用冲突。</div>
         ) : (
           <div className="table-scroll">
             <table className="min-w-[860px] w-full border-collapse text-sm">
@@ -829,7 +1109,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">日期</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">星期</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">时段</th>
-                  <th className="border-b border-slate-200 px-3 py-3 font-medium">单元</th>
+                  <th className="border-b border-slate-200 px-3 py-3 font-medium">{taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? "单元" : "班次"}</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">缺少人数</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">类型</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">说明</th>
@@ -841,7 +1121,11 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                     <td className="border-b border-slate-100 px-3 py-3">{toDateKey(conflict.date)}</td>
                     <td className="border-b border-slate-100 px-3 py-3">{getWeekdayLabel(conflict.weekday)}</td>
                     <td className="border-b border-slate-100 px-3 py-3">{SLOT_LABELS[conflict.timeSlot]}</td>
-                    <td className="border-b border-slate-100 px-3 py-3">单元{conflict.roomNumber}</td>
+                    <td className="border-b border-slate-100 px-3 py-3">
+                      {taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM
+                        ? `单元${conflict.roomNumber}`
+                        : shiftLabelForRequirement(requirementCells.find((cell) => cell.dateKey === toDateKey(conflict.date) && cell.timeSlot === conflict.timeSlot && cell.roomNumber === conflict.roomNumber))}
+                    </td>
                     <td className="border-b border-slate-100 px-3 py-3">{conflict.missingCount ?? 0}</td>
                     <td className="border-b border-slate-100 px-3 py-3">
                       <span className={`rounded border px-2 py-1 text-xs ${severityClass(conflict.severity)}`}>{conflict.conflictType}</span>
@@ -904,7 +1188,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                           <span key={assignment.id} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-700">
                             {assignment.date}
                             {assignment.weekdayLabel}
-                            {assignment.timeSlotLabel} 单元{assignment.roomNumber}
+                            {taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? `${assignment.timeSlotLabel} ${assignmentPlaceLabel(assignment)}` : assignmentPlaceLabel(assignment)}
                           </span>
                         ))}
                       </div>
@@ -933,7 +1217,8 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             {toDateKey(task.weekStartDate)} 至 {toDateKey(task.weekEndDate)}
           </h2>
           <div className="mt-2 flex flex-wrap gap-2 text-sm">
-            <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{MODE_LABELS[task.mode]}</span>
+            <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{TASK_SCHEDULE_MODE_LABELS[taskScheduleMode]}</span>
+            <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? MODE_LABELS[task.mode] : "按班次"}</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{STATUS_LABELS[task.status]}</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{task.doctors.length} 名人员</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{task.requirements.length} 条规则</span>
@@ -943,6 +1228,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           <RefreshCw size={16} />
           刷新
         </button>
+        <Link href={`/tasks/${task.id}/precheck`} className="focus-ring inline-flex w-fit items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+          排班前检查
+        </Link>
       </div>
 
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -1101,7 +1389,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
               ) : null}
               <div className="inline-flex rounded-md border border-slate-300 bg-white p-1">
                 <button onClick={() => setScheduleView("room")} className={scheduleView === "room" ? "rounded px-3 py-1.5 text-sm font-medium text-hospital-green" : "rounded px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"}>
-                  班次单元视图
+                  {taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? "单元视图" : "班次视图"}
                 </button>
                 <button onClick={() => setScheduleView("doctor")} className={scheduleView === "doctor" ? "rounded px-3 py-1.5 text-sm font-medium text-hospital-green" : "rounded px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"}>
                   人员视图
@@ -1111,7 +1399,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           </div>
           {renderStatsOverview()}
           {renderIdentityGroupStats()}
-          {scheduleView === "room" ? renderRoomTable(false) : renderDoctorView()}
+          {scheduleView === "room" ? renderScheduleGrid(false) : renderDoctorView()}
           {renderConflictReport()}
         </div>
       ) : null}
@@ -1122,7 +1410,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             <h3 className="text-lg font-semibold text-slate-950">手动调整</h3>
             <p className="text-sm text-slate-600">下拉框只列出该时间段可用且未重复占用的人员。</p>
           </div>
-          {renderRoomTable(true)}
+          {renderScheduleGrid(true)}
           {renderConflictReport()}
         </div>
       ) : null}
@@ -1137,7 +1425,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-slate-950">导出 Excel</h3>
-                  <p className="mt-1 text-sm text-slate-600">文件包含动态单元排班表、人员个人统计和冲突报告。</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    文件包含{taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? "动态单元排班表" : "班次矩阵排班表"}、人员个人统计和冲突报告。
+                  </p>
                   <button
                     type="button"
                     onClick={() => void exportExcel()}

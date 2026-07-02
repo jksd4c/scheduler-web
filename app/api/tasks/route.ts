@@ -6,7 +6,7 @@ import { dateFromKey, getWeekEndDateKey } from "@/lib/date-utils";
 import { mergeDoctorNameLists } from "@/lib/name-parser";
 import { getDefaultActiveUnit, getOrCreateDefaultUnit } from "@/lib/organizations";
 import { prisma } from "@/lib/prisma";
-import { DOCTOR_TYPE, SCHEDULE_MODE, SCHEDULE_STATUS } from "@/lib/schedule-rules";
+import { DOCTOR_TYPE, SCHEDULE_MODE, SCHEDULE_STATUS, TASK_SCHEDULE_MODE, asTaskScheduleMode } from "@/lib/schedule-rules";
 import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
@@ -40,6 +40,7 @@ export async function GET(request: Request) {
           weekStartDate: true,
           weekEndDate: true,
           mode: true,
+          scheduleMode: true,
           status: true,
           createdAt: true,
           updatedAt: true,
@@ -76,7 +77,16 @@ export async function POST(request: Request) {
     role = user.role;
     const body = await request.json();
     const weekStartDate = String(body.weekStartDate ?? "").slice(0, 10);
-    const mode = body.mode === SCHEDULE_MODE.HALF_DAY ? SCHEDULE_MODE.HALF_DAY : SCHEDULE_MODE.FULL_DAY;
+    const hasExplicitScheduleMode = body.scheduleMode != null && String(body.scheduleMode).trim() !== "";
+    const scheduleMode = hasExplicitScheduleMode
+      ? asTaskScheduleMode(String(body.scheduleMode))
+      : body.mode === SCHEDULE_MODE.HALF_DAY
+        ? TASK_SCHEDULE_MODE.MEDTECH_ROOM
+        : TASK_SCHEDULE_MODE.WARD_SHIFT;
+    const mode =
+      scheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM && body.mode === SCHEDULE_MODE.HALF_DAY
+        ? SCHEDULE_MODE.HALF_DAY
+        : SCHEDULE_MODE.FULL_DAY;
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartDate)) {
       return withApiTiming(NextResponse.json({ message: "排班周开始日期格式无效" }, { status: 400 }), {
@@ -151,6 +161,10 @@ export async function POST(request: Request) {
       });
     }
 
+    if (scheduleMode === TASK_SCHEDULE_MODE.WARD_SHIFT || scheduleMode === TASK_SCHEDULE_MODE.CUSTOM) {
+      await ensureDefaultWardShiftTypes(unitId);
+    }
+
     const staffProfiles = requestedStaffProfileIds.length
       ? await prisma.staffProfile.findMany({
           where: { unitId, id: { in: requestedStaffProfileIds }, active: true },
@@ -192,6 +206,7 @@ export async function POST(request: Request) {
         weekStartDate: dateFromKey(weekStartDate),
         weekEndDate: dateFromKey(weekEndDate),
         mode,
+        scheduleMode,
         status: SCHEDULE_STATUS.DRAFT,
         doctors: {
           create: [
@@ -241,6 +256,7 @@ export async function POST(request: Request) {
         weekStartDate,
         weekEndDate,
         mode,
+        scheduleMode,
         staffProfileCount: staffProfiles.length,
         manualPersonnelCount: manualDoctors.length,
         personnelCount: task.doctors.length
@@ -263,6 +279,28 @@ export async function POST(request: Request) {
       route: "POST /api/tasks",
       start,
       role
+    });
+  }
+}
+
+async function ensureDefaultWardShiftTypes(unitId: string) {
+  const defaults = [
+    { name: "白班", category: "DAY", isNight: false, workloadWeight: 1, color: "#0f766e" },
+    { name: "夜班", category: "NIGHT", isNight: true, workloadWeight: 1, color: "#1d4ed8" }
+  ];
+  for (const item of defaults) {
+    await prisma.shiftType.upsert({
+      where: { unitId_name: { unitId, name: item.name } },
+      update: { active: true, category: item.category, isNight: item.isNight },
+      create: {
+        unitId,
+        name: item.name,
+        category: item.category,
+        isNight: item.isNight,
+        workloadWeight: item.workloadWeight,
+        color: item.color,
+        active: true
+      }
     });
   }
 }

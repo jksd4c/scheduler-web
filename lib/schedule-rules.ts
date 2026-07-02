@@ -1,6 +1,7 @@
 import { toDateKey, type WeekdayNumber } from "@/lib/date-utils";
 
 export type ScheduleModeValue = "FULL_DAY" | "HALF_DAY";
+export type TaskScheduleModeValue = "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
 export type ScheduleStatusValue = "DRAFT" | "RULES_SET" | "GENERATED" | "PUBLISHED" | "LOCKED";
 export type DoctorTypeValue = "RESIDENT" | "INTERN";
 export type TimeSlotValue = "FULL_DAY" | "MORNING" | "AFTERNOON";
@@ -9,6 +10,12 @@ export type ConflictSeverityValue = "INFO" | "WARNING" | "ERROR";
 export const SCHEDULE_MODE = {
   FULL_DAY: "FULL_DAY",
   HALF_DAY: "HALF_DAY"
+} as const;
+
+export const TASK_SCHEDULE_MODE = {
+  WARD_SHIFT: "WARD_SHIFT",
+  MEDTECH_ROOM: "MEDTECH_ROOM",
+  CUSTOM: "CUSTOM"
 } as const;
 
 export const SCHEDULE_STATUS = {
@@ -45,6 +52,12 @@ export const SLOT_LABELS: Record<TimeSlotValue, string> = {
 export const MODE_LABELS: Record<ScheduleModeValue, string> = {
   FULL_DAY: "\u5168\u5929\u73ed",
   HALF_DAY: "\u534a\u5929\u73ed"
+};
+
+export const TASK_SCHEDULE_MODE_LABELS: Record<TaskScheduleModeValue, string> = {
+  WARD_SHIFT: "病房白班/夜班",
+  MEDTECH_ROOM: "医技科室按房间",
+  CUSTOM: "自定义排班"
 };
 
 export const STATUS_LABELS: Record<ScheduleStatusValue, string> = {
@@ -98,6 +111,13 @@ export const MAX_DOCTORS_PER_ROOM = 5;
 
 export function asScheduleMode(value: string): ScheduleModeValue {
   return value === SCHEDULE_MODE.HALF_DAY ? SCHEDULE_MODE.HALF_DAY : SCHEDULE_MODE.FULL_DAY;
+}
+
+export function asTaskScheduleMode(value: string | null | undefined): TaskScheduleModeValue {
+  if (value === TASK_SCHEDULE_MODE.WARD_SHIFT || value === TASK_SCHEDULE_MODE.CUSTOM) {
+    return value;
+  }
+  return TASK_SCHEDULE_MODE.MEDTECH_ROOM;
 }
 
 export function asScheduleStatus(value: string): ScheduleStatusValue {

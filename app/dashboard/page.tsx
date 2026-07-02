@@ -4,7 +4,7 @@ import { AccessCodeManager } from "@/components/access-code-manager";
 import { TaskList } from "@/components/task-list";
 import { isSchedulerAdminRole, requirePageUser, USER_ROLE } from "@/lib/auth";
 import { PRODUCT_VERSION_LABEL } from "@/lib/product";
-import { Tags, Timer, UsersRound } from "lucide-react";
+import { ClipboardCheck, KeyRound, Tags, Timer, UserCheck, UsersRound } from "lucide-react";
 
 export default async function DashboardPage() {
   const user = await requirePageUser();
@@ -47,6 +47,51 @@ export default async function DashboardPage() {
             <div>
               <div className="font-semibold text-slate-950">班次身份要求</div>
               <div className="mt-1 text-xs text-slate-500">REQUIRED / FORBIDDEN / ALLOWED</div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/dashboard/staff-pools" className="focus-ring rounded-lg border border-slate-200 bg-white p-4 shadow-table hover:border-hospital-green">
+          <div className="flex items-center gap-3">
+            <UsersRound className="text-hospital-green" size={22} />
+            <div>
+              <div className="font-semibold text-slate-950">人员池</div>
+              <div className="mt-1 text-xs text-slate-500">固定人员 / 轮转人员</div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/dashboard/roster" className="focus-ring rounded-lg border border-slate-200 bg-white p-4 shadow-table hover:border-hospital-green">
+          <div className="flex items-center gap-3">
+            <ClipboardCheck className="text-hospital-green" size={22} />
+            <div>
+              <div className="font-semibold text-slate-950">预录名单</div>
+              <div className="mt-1 text-xs text-slate-500">批量导入本期人员</div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/dashboard/join-codes" className="focus-ring rounded-lg border border-slate-200 bg-white p-4 shadow-table hover:border-hospital-green">
+          <div className="flex items-center gap-3">
+            <KeyRound className="text-hospital-green" size={22} />
+            <div>
+              <div className="font-semibold text-slate-950">访问码加入</div>
+              <div className="mt-1 text-xs text-slate-500">生成名单绑定加入码</div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/dashboard/join-claims" className="focus-ring rounded-lg border border-slate-200 bg-white p-4 shadow-table hover:border-hospital-green">
+          <div className="flex items-center gap-3">
+            <UserCheck className="text-hospital-green" size={22} />
+            <div>
+              <div className="font-semibold text-slate-950">人员确认</div>
+              <div className="mt-1 text-xs text-slate-500">确认姓名和手机号</div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/dashboard/feedback-review" className="focus-ring rounded-lg border border-slate-200 bg-white p-4 shadow-table hover:border-hospital-green">
+          <div className="flex items-center gap-3">
+            <ClipboardCheck className="text-hospital-green" size={22} />
+            <div>
+              <div className="font-semibold text-slate-950">反馈审核</div>
+              <div className="mt-1 text-xs text-slate-500">异常不可排审核</div>
             </div>
           </div>
         </Link>

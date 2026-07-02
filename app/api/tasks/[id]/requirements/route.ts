@@ -9,8 +9,10 @@ import {
   SCHEDULE_STATUS,
   TIME_SLOT,
   asScheduleMode,
+  asTaskScheduleMode,
   clampRequiredDoctors,
   clampRoomCount,
+  TASK_SCHEDULE_MODE,
   type TimeSlotValue
 } from "@/lib/schedule-rules";
 import { getTaskDetail } from "@/lib/tasks";
@@ -51,6 +53,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     }
 
     const mode = asScheduleMode(task.mode);
+    const taskScheduleMode = asTaskScheduleMode((task as any).scheduleMode);
     const requestedShiftTypeIds = Array.from(new Set(records.map((record) => String(record.shiftTypeId ?? "")).filter(Boolean)));
     const validShiftTypes = requestedShiftTypeIds.length
       ? await prisma.shiftType.findMany({
@@ -85,7 +88,11 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       if (!weekday) continue;
 
       const roomNumber = clampRoomCount(Number(record.roomNumber ?? 0));
-      const requiredDoctors = clampRequiredDoctors(Number(record.requiredDoctors ?? 1));
+      const requestedRequiredDoctors = Number(record.requiredDoctors ?? 1);
+      const requiredDoctors =
+        taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM
+          ? clampRequiredDoctors(requestedRequiredDoctors)
+          : Math.max(1, Math.min(50, Math.floor(Number.isFinite(requestedRequiredDoctors) ? requestedRequiredDoctors : 1)));
       const enabled = Boolean(record.enabled) && roomNumber > 0 && requiredDoctors > 0;
       if (!enabled) continue;
 

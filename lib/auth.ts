@@ -47,6 +47,7 @@ export function getUserHomePath(user: { role: string; mustChangePassword?: boole
   if (user.mustChangePassword) {
     return "/change-password";
   }
+  if (user.role === USER_ROLE.MEMBER) return "/member/feedback";
   return user.role === USER_ROLE.SUPER_ADMIN ? "/admin" : "/dashboard";
 }
 

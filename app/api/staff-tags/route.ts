@@ -30,7 +30,11 @@ const policyFields = [
   "allowDayAndNightSameDay",
   "allowDayAfterNightShift",
   "minRestHoursAfterNightShift",
+  "schedulingMode",
+  "targetShiftsPerPeriod",
+  "maxShiftsPerPeriod",
   "workloadFactor",
+  "countInFairness",
   "note"
 ] as const;
 
@@ -132,15 +136,24 @@ function normalizePolicyInput(input: Record<string, unknown>) {
       data[field] = Number.isFinite(numberValue) && numberValue > 0 ? Math.max(0.1, numberValue) : 1;
     } else if (field === "note") {
       data[field] = nullableString(value);
+    } else if (field === "schedulingMode") {
+      data[field] = normalizeSchedulingMode(value);
     } else if (field === "participatesInScheduling") {
       data[field] = value !== false;
-    } else if (field.startsWith("max") || field === "minRestHoursAfterNightShift") {
+    } else if (field === "countInFairness") {
+      data[field] = value !== false;
+    } else if (field.startsWith("max") || field === "minRestHoursAfterNightShift" || field === "targetShiftsPerPeriod") {
       data[field] = nullableInt(value);
     } else {
       data[field] = nullableBoolean(value);
     }
   }
   return data;
+}
+
+function normalizeSchedulingMode(value: unknown) {
+  const text = String(value ?? "").trim().toUpperCase();
+  return ["NORMAL", "REDUCED", "FIXED_TARGET", "MAX_LIMIT", "EXCLUDED"].includes(text) ? text : "NORMAL";
 }
 
 function nullableString(value: unknown) {

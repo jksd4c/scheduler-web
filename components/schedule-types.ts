@@ -1,4 +1,5 @@
 export type ScheduleMode = "FULL_DAY" | "HALF_DAY";
+export type TaskScheduleMode = "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
 export type ScheduleStatus = "DRAFT" | "RULES_SET" | "GENERATED" | "PUBLISHED" | "LOCKED";
 export type DoctorType = "RESIDENT" | "INTERN";
 export type TimeSlot = "FULL_DAY" | "MORNING" | "AFTERNOON";
@@ -152,6 +153,7 @@ export type ApiTaskDetail = {
   weekStartDate: string;
   weekEndDate: string;
   mode: ScheduleMode;
+  scheduleMode: TaskScheduleMode;
   status: ScheduleStatus;
   doctors: ApiDoctor[];
   unavailableTimes: ApiUnavailableTime[];
@@ -178,6 +180,7 @@ export type ApiTaskListItem = {
   weekStartDate: string;
   weekEndDate: string;
   mode: ScheduleMode;
+  scheduleMode: TaskScheduleMode;
   status: ScheduleStatus;
   createdAt: string;
   updatedAt: string;

@@ -23,32 +23,12 @@ const categories = [
   ["CUSTOM", "自定义"]
 ];
 
-const booleanFields = [
-  ["participatesInScheduling", "参与自动排班"],
-  ["canWorkDayShift", "可白班"],
-  ["canWorkNightShift", "可夜班"],
-  ["canWorkWeekend", "可周末"],
-  ["canWorkHoliday", "可节假日"],
-  ["canWorkFirstLine", "可一线"],
-  ["canWorkSecondLine", "可二线"],
-  ["canWorkEmergency", "可急诊"],
-  ["canWorkOnCall", "可留班"],
-  ["canWorkBackup", "可备班"],
-  ["canWorkIndependently", "可独立值班"],
-  ["allowConsecutiveNightShifts", "允许连续夜班"],
-  ["allowDayAndNightSameDay", "允许同日白班+夜班"],
-  ["allowDayAfterNightShift", "允许夜班后白班"]
-];
-
-const numberFields = [
-  ["maxShiftsPerWeek", "每周最多班次"],
-  ["maxWorkDaysPerWeek", "每周最多工作日"],
-  ["maxShiftsPerMonth", "每月最多班次"],
-  ["maxNightShiftsPerMonth", "每月最多夜班"],
-  ["maxWeekendShiftsPerMonth", "每月最多周末班"],
-  ["maxHolidayShiftsPerMonth", "每月最多节假日班"],
-  ["maxConsecutiveWorkDays", "最大连续工作日"],
-  ["minRestHoursAfterNightShift", "夜班后最小休息小时"]
+const schedulingModes = [
+  ["NORMAL", "正常参与"],
+  ["REDUCED", "减少排班"],
+  ["FIXED_TARGET", "固定目标班次数"],
+  ["MAX_LIMIT", "最多班次数"],
+  ["EXCLUDED", "不参与自动排班"]
 ];
 
 function emptyForm() {
@@ -61,6 +41,10 @@ function emptyForm() {
     sortOrder: 0,
     policy: {
       participatesInScheduling: true,
+      schedulingMode: "NORMAL",
+      targetShiftsPerPeriod: null,
+      maxShiftsPerPeriod: null,
+      countInFairness: true,
       workloadFactor: 1
     } as Record<string, any>
   };
@@ -156,33 +140,63 @@ export function StaffTagsClient() {
 
           <div className="mt-5 space-y-4">
             <div>
-              <h4 className="text-sm font-semibold text-slate-800">可排班次</h4>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {booleanFields.map(([field, label]) => (
-                  <label key={field} className="flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1.5 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.policy[field] === true}
-                      onChange={(event) => setPolicy(field, event.target.checked)}
-                    />
-                    {label}
-                  </label>
-                ))}
+              <h4 className="text-sm font-semibold text-slate-800">排班策略</h4>
+              <div className="mt-2 space-y-3 rounded-md bg-slate-50 p-3">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.policy.participatesInScheduling !== false}
+                    onChange={(event) => setPolicy("participatesInScheduling", event.target.checked)}
+                  />
+                  参与自动排班
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-slate-700">排班强度模式</span>
+                  <select
+                    className="focus-ring mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                    value={form.policy.schedulingMode ?? "NORMAL"}
+                    onChange={(event) => {
+                      const nextMode = event.target.value;
+                      setForm((previous) => ({
+                        ...previous,
+                        policy: {
+                          ...previous.policy,
+                          schedulingMode: nextMode,
+                          participatesInScheduling: nextMode === "EXCLUDED" ? false : previous.policy.participatesInScheduling !== false,
+                          workloadFactor:
+                            nextMode === "REDUCED" && (!previous.policy.workloadFactor || previous.policy.workloadFactor === 1)
+                              ? 0.6
+                              : previous.policy.workloadFactor
+                        }
+                      }));
+                    }}
+                  >
+                    {schedulingModes.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
             </div>
             <div>
-              <h4 className="text-sm font-semibold text-slate-800">数量上限</h4>
+              <h4 className="text-sm font-semibold text-slate-800">数量设置</h4>
               <div className="mt-2 grid grid-cols-2 gap-2">
-                {numberFields.map(([field, label]) => (
-                  <input key={field} type="number" min={0} className="focus-ring rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder={label} value={form.policy[field] ?? ""} onChange={(event) => setPolicy(field, event.target.value === "" ? null : Number(event.target.value))} />
-                ))}
+                <input type="number" min={0} className="focus-ring rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="本周期目标班次数" value={form.policy.targetShiftsPerPeriod ?? ""} onChange={(event) => setPolicy("targetShiftsPerPeriod", event.target.value === "" ? null : Number(event.target.value))} />
+                <input type="number" min={0} className="focus-ring rounded-md border border-slate-300 px-2 py-1.5 text-sm" placeholder="本周期最多班次数" value={form.policy.maxShiftsPerPeriod ?? ""} onChange={(event) => setPolicy("maxShiftsPerPeriod", event.target.value === "" ? null : Number(event.target.value))} />
               </div>
             </div>
             <label className="block text-sm">
               <span className="font-semibold text-slate-800">工作量系数</span>
               <input type="number" min={0.1} step={0.1} className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.policy.workloadFactor ?? 1} onChange={(event) => setPolicy("workloadFactor", Number(event.target.value))} />
             </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={form.policy.countInFairness !== false} onChange={(event) => setPolicy("countInFairness", event.target.checked)} />
+              计入长期公平统计
+            </label>
             <textarea className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={3} placeholder="备注" value={form.policy.note ?? ""} onChange={(event) => setPolicy("note", event.target.value)} />
+            <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              夜班、一线、二线、急诊等资格请在“班次身份要求”里用 required / forbidden / allowed 设置；连续夜班等休息安全规则默认由系统统一处理。
+            </div>
           </div>
 
           <div className="mt-5 flex items-center justify-between gap-3">
@@ -201,7 +215,7 @@ export function StaffTagsClient() {
               <div className="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">{categories.find(([value]) => value === category)?.[1] ?? category}</div>
               <div className="divide-y divide-slate-100">
                 {items.map((tag) => (
-                  <button key={tag.id} type="button" onClick={() => setForm({ id: tag.id, name: tag.name, category: tag.category, color: tag.color ?? "#0f766e", active: tag.active, sortOrder: tag.sortOrder, policy: { participatesInScheduling: true, workloadFactor: 1, ...(tag.policy ?? {}) } })} className="w-full px-4 py-3 text-left hover:bg-slate-50">
+                  <button key={tag.id} type="button" onClick={() => setForm({ id: tag.id, name: tag.name, category: tag.category, color: tag.color ?? "#0f766e", active: tag.active, sortOrder: tag.sortOrder, policy: { participatesInScheduling: true, schedulingMode: "NORMAL", targetShiftsPerPeriod: null, maxShiftsPerPeriod: null, countInFairness: true, workloadFactor: 1, ...(tag.policy ?? {}) } })} className="w-full px-4 py-3 text-left hover:bg-slate-50">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="h-3 w-3 rounded-full" style={{ backgroundColor: tag.color ?? "#94a3b8" }} />
                       <span className="font-medium text-slate-950">{tag.name}</span>

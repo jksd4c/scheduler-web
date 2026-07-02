@@ -163,6 +163,7 @@ model ScheduleTask {
   weekStartDate    DateTime
   weekEndDate      DateTime
   mode             String
+  scheduleMode     String                  @default("MEDTECH_ROOM")
   status           String                  @default("DRAFT")
   doctors          ScheduleDoctor[]
   participants     ScheduleParticipant[]
@@ -179,10 +180,128 @@ model ScheduleTask {
   @@index([createdByUserId])
   @@index([weekStartDate])
   @@index([status])
+  @@index([scheduleMode])
   @@index([createdAt])
   @@index([unitId, createdAt])
   @@index([departmentId, createdAt])
   @@index([status, createdAt])
+}
+
+model StaffPool {
+  id              String   @id @default(cuid())
+  hospitalId      String?
+  departmentId    String
+  unitId          String
+  scheduleTaskId  String?
+  poolType        String
+  name            String
+  startDate       DateTime?
+  endDate         DateTime?
+  active          Boolean  @default(true)
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([scheduleTaskId])
+  @@index([poolType])
+  @@index([active])
+  @@index([unitId, poolType])
+}
+
+model RosterEntry {
+  id                  String   @id @default(cuid())
+  hospitalId          String?
+  departmentId        String
+  unitId              String
+  scheduleTaskId      String?
+  staffPoolId         String?
+  staffProfileId      String?
+  userId              String?
+  poolType            String
+  expectedName        String
+  expectedPhone       String?
+  staffType           String?
+  identityTagIds      Json?
+  startDate           DateTime?
+  endDate             DateTime?
+  status              String   @default("WAITING_JOIN")
+  includeInScheduling Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([scheduleTaskId])
+  @@index([staffPoolId])
+  @@index([staffProfileId])
+  @@index([userId])
+  @@index([poolType])
+  @@index([status])
+  @@index([includeInScheduling])
+  @@index([unitId, status])
+  @@index([scheduleTaskId, status])
+}
+
+model JoinCode {
+  id              String    @id @default(cuid())
+  hospitalId      String?
+  departmentId    String
+  unitId          String
+  scheduleTaskId  String?
+  staffPoolId     String?
+  codeHash        String    @unique
+  roleToGrant     String    @default("MEMBER")
+  expiresAt       DateTime
+  active          Boolean   @default(true)
+  maxUses         Int?
+  useCount        Int       @default(0)
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  revokedAt       DateTime?
+
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([scheduleTaskId])
+  @@index([staffPoolId])
+  @@index([expiresAt])
+  @@index([active])
+}
+
+model JoinClaim {
+  id               String    @id @default(cuid())
+  joinCodeId       String
+  userId           String
+  rosterEntryId    String?
+  hospitalId       String?
+  departmentId     String
+  unitId           String
+  scheduleTaskId   String?
+  staffPoolId      String?
+  inputName        String
+  inputPhone       String
+  matchStatus      String
+  reviewStatus     String    @default("PENDING")
+  createdAt        DateTime  @default(now())
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  rejectReason     String?
+
+  @@index([joinCodeId])
+  @@index([userId])
+  @@index([rosterEntryId])
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([scheduleTaskId])
+  @@index([staffPoolId])
+  @@index([matchStatus])
+  @@index([reviewStatus])
+  @@index([createdAt])
 }
 
 model ScheduleDoctor {
@@ -301,7 +420,11 @@ model StaffTagPolicy {
   allowDayAndNightSameDay     Boolean?
   allowDayAfterNightShift     Boolean?
   minRestHoursAfterNightShift Int?
+  schedulingMode              String   @default("NORMAL")
+  targetShiftsPerPeriod       Int?
+  maxShiftsPerPeriod          Int?
   workloadFactor              Float    @default(1.0)
+  countInFairness             Boolean  @default(true)
   note                        String?
   createdAt                   DateTime @default(now())
   updatedAt                   DateTime @updatedAt
@@ -480,6 +603,55 @@ model Feedback {
   @@index([userId, createdAt])
   @@index([unitId, createdAt])
   @@index([status, createdAt])
+}
+
+model MemberFeedback {
+  id                  String   @id @default(cuid())
+  userId              String
+  joinClaimId         String?
+  rosterEntryId       String?
+  scheduleTaskId      String?
+  hospitalId          String?
+  departmentId        String?
+  unitId              String?
+  title               String?
+  message             String?
+  canWorkShiftTypeIds Json?
+  status              String   @default("WAITING_IDENTITY_CONFIRMATION")
+  effective           Boolean  @default(false)
+  anomalyStatus       String?
+  reviewedAt          DateTime?
+  reviewedByUserId    String?
+  reviewReason        String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  unavailableTimes    MemberFeedbackUnavailableTime[]
+
+  @@index([userId])
+  @@index([joinClaimId])
+  @@index([rosterEntryId])
+  @@index([scheduleTaskId])
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([status])
+  @@index([effective])
+  @@index([createdAt])
+  @@index([unitId, createdAt])
+  @@index([scheduleTaskId, effective])
+}
+
+model MemberFeedbackUnavailableTime {
+  id         String         @id @default(cuid())
+  feedbackId String
+  feedback   MemberFeedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  date       DateTime
+  timeSlot   String
+  reason     String?
+  createdAt  DateTime       @default(now())
+
+  @@index([feedbackId])
+  @@index([date, timeSlot])
 }
 
 model OrganizationRequest {

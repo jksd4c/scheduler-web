@@ -23,6 +23,14 @@ export const SHIFT_TAG_REQUIREMENT = {
   ALLOWED: "ALLOWED"
 } as const;
 
+export const STAFF_SCHEDULING_MODE = {
+  NORMAL: "NORMAL",
+  REDUCED: "REDUCED",
+  FIXED_TARGET: "FIXED_TARGET",
+  MAX_LIMIT: "MAX_LIMIT",
+  EXCLUDED: "EXCLUDED"
+} as const;
+
 const booleanPolicyFields = [
   "canWorkDayShift",
   "canWorkNightShift",
@@ -59,7 +67,11 @@ export type StaffTagSnapshot = {
 
 export type EffectiveStaffPolicy = {
   participatesInScheduling: boolean;
+  schedulingMode: string;
+  targetShiftsPerPeriod?: number | null;
+  maxShiftsPerPeriod?: number | null;
   workloadFactor: number;
+  countInFairness: boolean;
   sourceTagNames: string[];
   canWorkDayShift?: boolean | null;
   canWorkNightShift?: boolean | null;
@@ -124,7 +136,9 @@ export function buildTagSnapshot(tags: TagWithPolicy[]): StaffTagSnapshot[] {
 export function resolveEffectivePolicy(tags: TagWithPolicy[]): EffectiveStaffPolicy {
   const policy: EffectiveStaffPolicy = {
     participatesInScheduling: true,
+    schedulingMode: STAFF_SCHEDULING_MODE.NORMAL,
     workloadFactor: 1,
+    countInFairness: true,
     sourceTagNames: tags.map((tag) => tag.name)
   };
 
@@ -134,6 +148,25 @@ export function resolveEffectivePolicy(tags: TagWithPolicy[]): EffectiveStaffPol
 
     if (item.participatesInScheduling === false) {
       policy.participatesInScheduling = false;
+    }
+
+    const schedulingMode = normalizeSchedulingMode(item.schedulingMode);
+    policy.schedulingMode = mergeSchedulingMode(policy.schedulingMode, schedulingMode);
+    if (schedulingMode === STAFF_SCHEDULING_MODE.EXCLUDED) {
+      policy.participatesInScheduling = false;
+    }
+    if (item.countInFairness === false) {
+      policy.countInFairness = false;
+    }
+
+    const target = normalizeNullableInt(item.targetShiftsPerPeriod);
+    if (target !== null) {
+      policy.targetShiftsPerPeriod =
+        policy.targetShiftsPerPeriod == null ? target : Math.min(policy.targetShiftsPerPeriod, target);
+    }
+    const max = normalizeNullableInt(item.maxShiftsPerPeriod);
+    if (max !== null) {
+      policy.maxShiftsPerPeriod = policy.maxShiftsPerPeriod == null ? max : Math.min(policy.maxShiftsPerPeriod, max);
     }
 
     for (const field of booleanPolicyFields) {
@@ -155,7 +188,15 @@ export function resolveEffectivePolicy(tags: TagWithPolicy[]): EffectiveStaffPol
     const workloadFactor = Number(item.workloadFactor);
     if (Number.isFinite(workloadFactor) && workloadFactor > 0) {
       policy.workloadFactor = Math.min(policy.workloadFactor, workloadFactor);
+    } else if (schedulingMode === STAFF_SCHEDULING_MODE.REDUCED) {
+      policy.workloadFactor = Math.min(policy.workloadFactor, 0.6);
     }
+  }
+
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.EXCLUDED) {
+    policy.participatesInScheduling = false;
+    policy.targetShiftsPerPeriod = 0;
+    policy.maxShiftsPerPeriod = 0;
   }
 
   policy.workloadFactor = Math.max(0.1, Number(policy.workloadFactor.toFixed(2)));
@@ -183,14 +224,27 @@ export function parseTagSnapshot(value: unknown): StaffTagSnapshot[] {
 
 export function parseEffectivePolicy(value: unknown): EffectiveStaffPolicy {
   if (!value || typeof value !== "object") {
-    return { participatesInScheduling: true, workloadFactor: 1, sourceTagNames: [] };
+    return {
+      participatesInScheduling: true,
+      schedulingMode: STAFF_SCHEDULING_MODE.NORMAL,
+      workloadFactor: 1,
+      countInFairness: true,
+      sourceTagNames: []
+    };
   }
   const record = value as Record<string, unknown>;
   const policy: EffectiveStaffPolicy = {
     participatesInScheduling: record.participatesInScheduling !== false,
+    schedulingMode: normalizeSchedulingMode(record.schedulingMode),
+    targetShiftsPerPeriod: normalizeNullableInt(record.targetShiftsPerPeriod),
+    maxShiftsPerPeriod: normalizeNullableInt(record.maxShiftsPerPeriod),
     workloadFactor: Math.max(0.1, Number(record.workloadFactor) || 1),
+    countInFairness: record.countInFairness !== false,
     sourceTagNames: Array.isArray(record.sourceTagNames) ? record.sourceTagNames.map(String) : []
   };
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.EXCLUDED) {
+    policy.participatesInScheduling = false;
+  }
 
   for (const field of booleanPolicyFields) {
     if (record[field] === true || record[field] === false) {
@@ -204,32 +258,23 @@ export function parseEffectivePolicy(value: unknown): EffectiveStaffPolicy {
 }
 
 export function summarizeEligibility(policy: EffectiveStaffPolicy) {
-  const labels = [
-    policy.participatesInScheduling ? "参与自动排班" : "不参与自动排班",
-    capabilityLabel("白班", policy.canWorkDayShift),
-    capabilityLabel("夜班", policy.canWorkNightShift),
-    capabilityLabel("周末", policy.canWorkWeekend),
-    capabilityLabel("一线", policy.canWorkFirstLine),
-    capabilityLabel("二线", policy.canWorkSecondLine),
-    capabilityLabel("急诊", policy.canWorkEmergency),
-    capabilityLabel("留班/备班", policy.canWorkOnCall ?? policy.canWorkBackup),
-    capabilityLabel("独立值班", policy.canWorkIndependently)
-  ].filter(Boolean);
+  const labels = [policy.participatesInScheduling ? "参与自动排班" : "不参与自动排班", schedulingModeLabel(policy.schedulingMode)].filter(Boolean);
 
   const limits = [
-    policy.maxShiftsPerWeek != null ? `每周最多${policy.maxShiftsPerWeek}班` : "",
-    policy.maxWorkDaysPerWeek != null ? `每周最多${policy.maxWorkDaysPerWeek}天` : "",
-    policy.maxNightShiftsPerMonth != null ? `每月夜班最多${policy.maxNightShiftsPerMonth}个` : "",
-    policy.maxWeekendShiftsPerMonth != null ? `每月周末最多${policy.maxWeekendShiftsPerMonth}个` : ""
+    policy.targetShiftsPerPeriod != null ? `目标${policy.targetShiftsPerPeriod}班` : "",
+    policy.maxShiftsPerPeriod != null ? `最多${policy.maxShiftsPerPeriod}班` : "",
+    policy.countInFairness ? "计入长期公平" : "不计入长期公平"
   ].filter(Boolean);
 
   return [...labels, `工作量系数${policy.workloadFactor}`, ...limits].join("，");
 }
 
-function capabilityLabel(label: string, value: boolean | null | undefined) {
-  if (value === true) return `可${label}`;
-  if (value === false) return `不可${label}`;
-  return "";
+function schedulingModeLabel(value: string) {
+  if (value === STAFF_SCHEDULING_MODE.REDUCED) return "减少排班";
+  if (value === STAFF_SCHEDULING_MODE.FIXED_TARGET) return "固定目标班次";
+  if (value === STAFF_SCHEDULING_MODE.MAX_LIMIT) return "最多班次数";
+  if (value === STAFF_SCHEDULING_MODE.EXCLUDED) return "不参与自动排班";
+  return "正常参与";
 }
 
 function normalizeNullableInt(value: unknown) {
@@ -237,4 +282,21 @@ function normalizeNullableInt(value: unknown) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue)) return null;
   return Math.max(0, Math.floor(numberValue));
+}
+
+function normalizeSchedulingMode(value: unknown) {
+  const text = String(value ?? "").trim().toUpperCase();
+  if (Object.values(STAFF_SCHEDULING_MODE).includes(text as any)) return text;
+  return STAFF_SCHEDULING_MODE.NORMAL;
+}
+
+function mergeSchedulingMode(current: string, next: string) {
+  const order = [
+    STAFF_SCHEDULING_MODE.NORMAL,
+    STAFF_SCHEDULING_MODE.REDUCED,
+    STAFF_SCHEDULING_MODE.FIXED_TARGET,
+    STAFF_SCHEDULING_MODE.MAX_LIMIT,
+    STAFF_SCHEDULING_MODE.EXCLUDED
+  ];
+  return order.indexOf(next as any) > order.indexOf(current as any) ? next : current;
 }

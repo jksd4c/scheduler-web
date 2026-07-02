@@ -5,7 +5,7 @@ import { dateFromKey, getWeekDates, toDateKey } from "@/lib/date-utils";
 import { prisma } from "@/lib/prisma";
 import { rebuildConflictsForTask } from "@/lib/scheduler";
 import { SCHEDULE_STATUS, TIME_SLOT, asTimeSlot, type TimeSlotValue } from "@/lib/schedule-rules";
-import { parseEffectivePolicy, parseTagSnapshot, SHIFT_TAG_REQUIREMENT, SHIFT_TYPE_CATEGORY } from "@/lib/staff-policy";
+import { parseEffectivePolicy, parseTagSnapshot, STAFF_SCHEDULING_MODE, SHIFT_TAG_REQUIREMENT } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
 
@@ -156,6 +156,7 @@ function identityBlockReason(doctor: any, requirement: any) {
   const tagIds = new Set(parseTagSnapshot(doctor.tagSnapshotJson).map((tag) => tag.id));
   const policy = parseEffectivePolicy(doctor.policySnapshotJson);
   if (!policy.participatesInScheduling) return "身份策略不参与自动排班";
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.EXCLUDED) return "身份策略不参与自动排班";
 
   const rules = requirement.shiftType?.requiredTags ?? [];
   for (const rule of rules.filter((item: any) => item.requirementType === SHIFT_TAG_REQUIREMENT.FORBIDDEN)) {
@@ -167,14 +168,5 @@ function identityBlockReason(doctor: any, requirement: any) {
   const allowed = rules.filter((item: any) => item.requirementType === SHIFT_TAG_REQUIREMENT.ALLOWED);
   if (allowed.length && !allowed.some((rule: any) => tagIds.has(rule.staffTagId))) return "不在允许身份范围内";
 
-  const category = requirement.shiftType?.category ?? "";
-  const isNightShift = Boolean(requirement.shiftType?.isNight) || category === SHIFT_TYPE_CATEGORY.NIGHT;
-  if (isNightShift && policy.canWorkNightShift === false) return "身份策略禁止夜班";
-  if (!isNightShift && policy.canWorkDayShift === false) return "身份策略禁止白班";
-  if (category === SHIFT_TYPE_CATEGORY.FIRST_LINE && policy.canWorkFirstLine === false) return "身份策略禁止一线班";
-  if (category === SHIFT_TYPE_CATEGORY.SECOND_LINE && policy.canWorkSecondLine === false) return "身份策略禁止二线班";
-  if (category === SHIFT_TYPE_CATEGORY.EMERGENCY && policy.canWorkEmergency === false) return "身份策略禁止急诊班";
-  if (category === SHIFT_TYPE_CATEGORY.ON_CALL && policy.canWorkOnCall === false) return "身份策略禁止留班";
-  if (category === SHIFT_TYPE_CATEGORY.BACKUP && policy.canWorkBackup === false) return "身份策略禁止备班";
   return "";
 }

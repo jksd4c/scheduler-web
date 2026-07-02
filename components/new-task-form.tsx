@@ -1,13 +1,13 @@
 "use client";
 
-import { ArrowLeft, CalendarPlus, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Building2, CalendarPlus, CheckCircle2, Columns3, Moon, SlidersHorizontal } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getNextMonday, getWeekEndDateKey } from "@/lib/date-utils";
-import { MODE_LABELS } from "@/lib/schedule-rules";
+import { MODE_LABELS, TASK_SCHEDULE_MODE_LABELS } from "@/lib/schedule-rules";
 import { mergeDoctorNameLists } from "@/lib/name-parser";
-import type { ScheduleMode } from "@/components/schedule-types";
+import type { ScheduleMode, TaskScheduleMode } from "@/components/schedule-types";
 
 type StaffOption = {
   id: string;
@@ -19,6 +19,8 @@ type StaffOption = {
 
 export function NewTaskForm() {
   const router = useRouter();
+  const [step, setStep] = useState<"choose" | "form">("choose");
+  const [scheduleMode, setScheduleMode] = useState<TaskScheduleMode>("WARD_SHIFT");
   const [weekStartDate, setWeekStartDate] = useState(getNextMonday());
   const [mode, setMode] = useState<ScheduleMode>("FULL_DAY");
   const [residentNames, setResidentNames] = useState("");
@@ -30,6 +32,7 @@ export function NewTaskForm() {
 
   const parsed = useMemo(() => mergeDoctorNameLists(residentNames, internNames), [residentNames, internNames]);
   const totalDoctors = parsed.residents.length + parsed.interns.length + selectedStaffIds.length;
+  const taskMode = scheduleMode === "MEDTECH_ROOM" ? mode : "FULL_DAY";
 
   useEffect(() => {
     fetch("/api/staff")
@@ -45,7 +48,7 @@ export function NewTaskForm() {
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ weekStartDate, mode, residentNames, internNames, staffProfileIds: selectedStaffIds })
+        body: JSON.stringify({ weekStartDate, mode: taskMode, scheduleMode, residentNames, internNames, staffProfileIds: selectedStaffIds })
       });
       const data = await response.json();
       if (!response.ok) {
@@ -59,6 +62,90 @@ export function NewTaskForm() {
     }
   }
 
+  if (step === "choose") {
+    const cards: Array<{
+      id: TaskScheduleMode;
+      title: string;
+      fit: string;
+      detail: string;
+      recommended?: boolean;
+      Icon: typeof Moon;
+    }> = [
+      {
+        id: "WARD_SHIFT",
+        title: "病房白班/夜班排班",
+        fit: "适用于：临床病区、住院部、ICU、急诊病区、一线/二线、住院总等。",
+        detail: "按白班、夜班、一线、二线、留班等班次设置每天需求人数。",
+        recommended: true,
+        Icon: Moon
+      },
+      {
+        id: "MEDTECH_ROOM",
+        title: "医技科室按房间排班",
+        fit: "适用于：超声科、内镜中心、放射科、检验窗口、门诊检查室等。",
+        detail: "按房间、检查室、窗口或单元数量排班，每个单元设置需要人数。",
+        Icon: Columns3
+      },
+      {
+        id: "CUSTOM",
+        title: "自定义排班",
+        fit: "适用于：特殊规则、临时任务、节假日专项、混合班次。",
+        detail: "先使用班次矩阵创建需求，后续可在班次类型中继续扩展资格要求。",
+        Icon: SlidersHorizontal
+      }
+    ];
+
+    return (
+      <section className="space-y-6">
+        <Link href="/" className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900">
+          <ArrowLeft size={16} />
+          返回任务列表
+        </Link>
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-950">选择排班模式</h2>
+          <p className="mt-1 text-sm text-slate-600">不同科室的排班逻辑不同，请先选择最接近实际场景的排班模式。后续仍可在规则页面中继续调整。</p>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          {cards.map(({ id, title, fit, detail, recommended, Icon }) => {
+            const selected = scheduleMode === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setScheduleMode(id)}
+                className={
+                  selected
+                    ? "focus-ring rounded-lg border-2 border-hospital-green bg-teal-50 p-5 text-left shadow-table"
+                    : "focus-ring rounded-lg border border-slate-200 bg-white p-5 text-left shadow-table hover:border-hospital-green"
+                }
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="rounded-lg bg-white p-2 text-hospital-green ring-1 ring-slate-200">
+                    <Icon size={22} />
+                  </div>
+                  {recommended ? <span className="rounded-full bg-hospital-green px-2 py-1 text-xs font-medium text-white">推荐默认</span> : null}
+                </div>
+                <h3 className="mt-4 text-lg font-semibold text-slate-950">{title}</h3>
+                <p className="mt-2 text-sm text-slate-600">{fit}</p>
+                <p className="mt-2 text-sm text-slate-500">{detail}</p>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => setStep("form")}
+            className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800"
+          >
+            <CalendarPlus size={16} />
+            使用{TASK_SCHEDULE_MODE_LABELS[scheduleMode]}创建任务
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-5">
       <div className="flex items-center justify-between gap-4">
@@ -68,8 +155,12 @@ export function NewTaskForm() {
             返回任务列表
           </Link>
           <h2 className="mt-3 text-2xl font-semibold text-slate-950">新建排班任务</h2>
-          <p className="mt-1 text-sm text-slate-600">输入本次参与排班的人员名单，可按 A/B 分组便于显示和统计。</p>
+          <p className="mt-1 text-sm text-slate-600">当前模式：{TASK_SCHEDULE_MODE_LABELS[scheduleMode]}。输入本次参与排班的人员名单，可按 A/B 分组便于显示和统计。</p>
         </div>
+        <button type="button" onClick={() => setStep("choose")} className="focus-ring inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+          <Building2 size={16} />
+          重选模式
+        </button>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
@@ -86,6 +177,7 @@ export function NewTaskForm() {
               <span className="mt-1 block text-xs text-slate-500">本周范围：{weekStartDate} 至 {getWeekEndDateKey(weekStartDate)}</span>
             </label>
 
+            {scheduleMode === "MEDTECH_ROOM" ? (
             <div>
               <span className="text-sm font-medium text-slate-700">排班模式</span>
               <div className="mt-1 grid grid-cols-2 gap-2">
@@ -105,6 +197,12 @@ export function NewTaskForm() {
                 ))}
               </div>
             </div>
+            ) : (
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                <div className="font-medium text-slate-800">规则类型</div>
+                <div className="mt-1">{scheduleMode === "CUSTOM" ? "自定义班次矩阵" : "病房白班/夜班班次矩阵"}</div>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
