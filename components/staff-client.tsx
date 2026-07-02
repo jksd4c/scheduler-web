@@ -24,19 +24,25 @@ export function StaffClient() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [form, setForm] = useState(emptyForm());
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const editing = Boolean(form.id);
 
   async function load() {
-    const [staffResponse, tagResponse] = await Promise.all([
-      fetch("/api/staff", { cache: "no-store" }),
-      fetch("/api/staff-tags", { cache: "no-store" })
-    ]);
-    const staffData = await staffResponse.json();
-    const tagData = await tagResponse.json();
-    setStaff(staffData.staff ?? []);
-    setTags((tagData.tags ?? []).filter((tag: any) => tag.active));
+    setLoading(true);
+    try {
+      const [staffResponse, tagResponse] = await Promise.all([
+        fetch("/api/staff", { cache: "no-store" }),
+        fetch("/api/staff-tags", { cache: "no-store" })
+      ]);
+      const staffData = await staffResponse.json();
+      const tagData = await tagResponse.json();
+      setStaff(staffData.staff ?? []);
+      setTags((tagData.tags ?? []).filter((tag: any) => tag.active));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -104,6 +110,7 @@ export function StaffClient() {
 
   return (
     <section className="space-y-5">
+      {loading ? <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">正在加载人员库...</div> : null}
       <div>
         <h2 className="text-2xl font-semibold text-slate-950">人员管理</h2>
         <p className="mt-1 text-sm text-slate-600">维护本病区人员库，并给人员绑定多个身份/资格。创建排班任务时可从人员库选择参与人员。</p>

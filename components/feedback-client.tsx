@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquarePlus } from "lucide-react";
+import { Loader2, MessageSquarePlus } from "lucide-react";
 import { useState } from "react";
 
 type FeedbackItem = {
@@ -45,6 +45,7 @@ export function FeedbackClient({ initialFeedback, admin = false }: { initialFeed
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [updatingStatusId, setUpdatingStatusId] = useState("");
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,17 +77,23 @@ export function FeedbackClient({ initialFeedback, admin = false }: { initialFeed
 
   async function updateStatus(id: string, status: string) {
     setError("");
-    const response = await fetch(`/api/admin/feedback/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "更新失败");
-      return;
+    setUpdatingStatusId(id);
+    try {
+      const response = await fetch(`/api/admin/feedback/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "更新失败");
+      }
+      setFeedback((previous) => previous.map((item) => (item.id === id ? data.feedback : item)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新失败");
+    } finally {
+      setUpdatingStatusId("");
     }
-    setFeedback((previous) => previous.map((item) => (item.id === id ? data.feedback : item)));
   }
 
   return (
@@ -128,13 +135,15 @@ export function FeedbackClient({ initialFeedback, admin = false }: { initialFeed
           </label>
           {message ? <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div> : null}
           {error ? <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
-          <button type="submit" disabled={loading || !title.trim() || !content.trim()} className="focus-ring w-full rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          <button type="submit" disabled={loading || !title.trim() || !content.trim()} className="focus-ring inline-flex w-full items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+            {loading ? <Loader2 size={16} className="animate-spin" /> : null}
             {loading ? "提交中" : "提交反馈"}
           </button>
         </form>
       ) : null}
 
       <section className={admin ? "lg:col-span-2" : ""}>
+        {admin && error ? <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
           <div className="border-b border-slate-200 px-4 py-3">
             <h2 className="font-semibold text-slate-950">{admin ? "全部反馈" : "我的反馈"}</h2>
@@ -172,10 +181,15 @@ export function FeedbackClient({ initialFeedback, admin = false }: { initialFeed
                       </td>
                       <td className="border-b border-slate-100 px-4 py-3">
                         {admin ? (
-                          <select value={item.status} onChange={(event) => void updateStatus(item.id, event.target.value)} className="focus-ring rounded-md border border-slate-300 px-2 py-1 text-xs">
+                          <select
+                            value={item.status}
+                            disabled={updatingStatusId === item.id}
+                            onChange={(event) => void updateStatus(item.id, event.target.value)}
+                            className="focus-ring rounded-md border border-slate-300 px-2 py-1 text-xs disabled:bg-slate-100"
+                          >
                             {Object.entries(STATUS_LABELS).map(([value, label]) => (
                               <option key={value} value={value}>
-                                {label}
+                                {updatingStatusId === item.id && value === item.status ? "更新中..." : label}
                               </option>
                             ))}
                           </select>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, isSchedulerAdminRole, requireUser, USER_ROLE } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { dateFromKey, getWeekEndDateKey } from "@/lib/date-utils";
@@ -10,46 +11,79 @@ import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+const TASK_LIST_PAGE_SIZE = 30;
+
+export async function GET(request: Request) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const user = await requireUser();
-    const tasks = await prisma.scheduleTask.findMany({
-      where:
-        user.role === USER_ROLE.SUPER_ADMIN
-          ? undefined
-          : user.unitId
-            ? { unitId: user.unitId }
-            : { departmentId: user.departmentId ?? "__none__" },
-      orderBy: { createdAt: "desc" },
-      include: {
-        hospital: true,
-        department: true,
-        unit: true,
-        _count: {
-          select: {
-            doctors: true,
-            assignments: true,
-            conflicts: true
+    role = user.role;
+    const url = new URL(request.url);
+    const page = Math.max(1, Number(url.searchParams.get("page") ?? 1) || 1);
+    const pageSize = Math.min(50, Math.max(10, Number(url.searchParams.get("pageSize") ?? TASK_LIST_PAGE_SIZE) || TASK_LIST_PAGE_SIZE));
+    const where =
+      user.role === USER_ROLE.SUPER_ADMIN
+        ? undefined
+        : user.unitId
+          ? { unitId: user.unitId }
+          : { departmentId: user.departmentId ?? "__none__" };
+
+    const [tasks, total] = await Promise.all([
+      prisma.scheduleTask.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          weekStartDate: true,
+          weekEndDate: true,
+          mode: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          department: { select: { id: true, name: true, isActive: true } },
+          unit: { select: { id: true, name: true, isActive: true } },
+          _count: {
+            select: {
+              doctors: true,
+              assignments: true,
+              conflicts: true
+            }
           }
         }
-      }
-    });
+      }),
+      prisma.scheduleTask.count({ where })
+    ]);
 
-    return NextResponse.json({ tasks });
+    return withApiTiming(NextResponse.json({ tasks, pagination: { page, pageSize, total } }), {
+      route: "GET /api/tasks",
+      start,
+      role
+    });
   } catch (error) {
-    return authErrorResponse(error);
+    const response = authErrorResponse(error);
+    return withApiTiming(response, { route: "GET /api/tasks", start, role });
   }
 }
 
 export async function POST(request: Request) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const user = await requireUser();
+    role = user.role;
     const body = await request.json();
     const weekStartDate = String(body.weekStartDate ?? "").slice(0, 10);
     const mode = body.mode === SCHEDULE_MODE.HALF_DAY ? SCHEDULE_MODE.HALF_DAY : SCHEDULE_MODE.FULL_DAY;
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartDate)) {
-      return NextResponse.json({ message: "排班周开始日期格式无效" }, { status: 400 });
+      return withApiTiming(NextResponse.json({ message: "排班周开始日期格式无效" }, { status: 400 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
     }
 
     const { residents, interns } = mergeDoctorNameLists(
@@ -59,7 +93,11 @@ export async function POST(request: Request) {
     const requestedStaffProfileIds = Array.isArray(body.staffProfileIds) ? body.staffProfileIds.map(String).filter(Boolean) : [];
 
     if (residents.length + interns.length + requestedStaffProfileIds.length === 0) {
-      return NextResponse.json({ message: "请至少输入一名人员" }, { status: 400 });
+      return withApiTiming(NextResponse.json({ message: "请至少输入一名人员" }, { status: 400 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
     }
 
     let hospitalId: string | null = user.hospitalId ?? null;
@@ -71,7 +109,11 @@ export async function POST(request: Request) {
         ? await prisma.unit.findUnique({ where: { id: requestedUnitId }, include: { hospital: true, department: true } })
         : await getDefaultActiveUnit(user.id);
       if (!unit || !unit.isActive || !unit.department?.isActive) {
-        return NextResponse.json({ message: "请选择有效的病区" }, { status: 400 });
+        return withApiTiming(NextResponse.json({ message: "请选择有效的病区/小组" }, { status: 400 }), {
+          route: "POST /api/tasks",
+          start,
+          role
+        });
       }
       hospitalId = unit.hospitalId;
       departmentId = unit.departmentId;
@@ -86,15 +128,27 @@ export async function POST(request: Request) {
     }
 
     if (!departmentId || !unitId) {
-      return NextResponse.json({ message: "当前账号没有所属病区" }, { status: 403 });
+      return withApiTiming(NextResponse.json({ message: "当前账号没有所属病区/小组" }, { status: 403 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
     }
 
     const unit = await prisma.unit.findUnique({ where: { id: unitId }, include: { department: true, hospital: true } });
     if (!unit || !unit.isActive || !unit.department.isActive || (unit.hospitalId && !unit.hospital?.isActive)) {
-      return NextResponse.json({ message: "病区不存在或已停用" }, { status: 400 });
+      return withApiTiming(NextResponse.json({ message: "病区/小组不存在或已停用" }, { status: 400 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
     }
     if (isSchedulerAdminRole(user.role) && user.unitId && user.unitId !== unitId) {
-      return NextResponse.json({ message: "无权限在其他病区创建排班" }, { status: 403 });
+      return withApiTiming(NextResponse.json({ message: "无权在其他病区/小组创建排班" }, { status: 403 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
     }
 
     const staffProfiles = requestedStaffProfileIds.length
@@ -194,12 +248,21 @@ export async function POST(request: Request) {
       request
     });
 
-    return NextResponse.json({ task }, { status: 201 });
+    return withApiTiming(NextResponse.json({ task }, { status: 201 }), {
+      route: "POST /api/tasks",
+      start,
+      role
+    });
   } catch (error) {
     if (error instanceof Error && "status" in error) {
-      return authErrorResponse(error);
+      const response = authErrorResponse(error);
+      return withApiTiming(response, { route: "POST /api/tasks", start, role });
     }
     console.error(error);
-    return NextResponse.json({ message: "创建排班任务失败" }, { status: 500 });
+    return withApiTiming(NextResponse.json({ message: "创建排班任务失败" }, { status: 500 }), {
+      route: "POST /api/tasks",
+      start,
+      role
+    });
   }
 }

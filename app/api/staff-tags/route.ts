@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -34,33 +35,47 @@ const policyFields = [
 ] as const;
 
 export async function GET(request: Request) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const url = new URL(request.url);
-    const { unit } = await requireManagedUnit(url.searchParams.get("unitId"));
+    const { user, unit } = await requireManagedUnit(url.searchParams.get("unitId"));
+    role = user.role;
     const tags = await prisma.staffTag.findMany({
       where: { unitId: unit.id },
       include: { policy: true, _count: { select: { staffProfileTags: true } } },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }]
     });
 
-    return NextResponse.json({
-      tags: tags.map((tag) => ({
-        ...tag,
-        effectiveSummary: summarizeEligibility(resolveEffectivePolicy([{ ...tag, policy: tag.policy }]))
-      }))
-    });
+    return withApiTiming(
+      NextResponse.json({
+        tags: tags.map((tag) => ({
+          ...tag,
+          effectiveSummary: summarizeEligibility(resolveEffectivePolicy([{ ...tag, policy: tag.policy }]))
+        }))
+      }),
+      { route: "GET /api/staff-tags", start, role }
+    );
   } catch (error) {
-    return authErrorResponse(error);
+    const response = authErrorResponse(error);
+    return withApiTiming(response, { route: "GET /api/staff-tags", start, role });
   }
 }
 
 export async function POST(request: Request) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const body = await request.json();
     const { user, unit } = await requireManagedUnit(body.unitId);
+    role = user.role;
     const name = String(body.name ?? "").trim();
     if (!name) {
-      return NextResponse.json({ message: "请填写身份名称" }, { status: 400 });
+      return withApiTiming(NextResponse.json({ message: "请填写身份名称" }, { status: 400 }), {
+        route: "POST /api/staff-tags",
+        start,
+        role
+      });
     }
 
     const policyData = normalizePolicyInput(body.policy ?? {});
@@ -89,11 +104,22 @@ export async function POST(request: Request) {
       request
     });
 
-    return NextResponse.json({ tag }, { status: 201 });
+    return withApiTiming(NextResponse.json({ tag }, { status: 201 }), {
+      route: "POST /api/staff-tags",
+      start,
+      role
+    });
   } catch (error) {
-    if (error instanceof Error && "status" in error) return authErrorResponse(error);
+    if (error instanceof Error && "status" in error) {
+      const response = authErrorResponse(error);
+      return withApiTiming(response, { route: "POST /api/staff-tags", start, role });
+    }
     console.error(error);
-    return NextResponse.json({ message: "保存身份失败，可能存在同名身份" }, { status: 500 });
+    return withApiTiming(NextResponse.json({ message: "保存身份失败，可能存在同名身份" }, { status: 500 }), {
+      route: "POST /api/staff-tags",
+      start,
+      role
+    });
   }
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 type HospitalItem = {
   id: string;
@@ -15,37 +15,51 @@ export function AdminHospitalsClient({ hospitals }: { hospitals: HospitalItem[] 
   const [items, setItems] = useState(hospitals);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [updatingId, setUpdatingId] = useState("");
 
   async function createHospital(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const response = await fetch("/api/admin/hospitals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "创建医院失败");
-      return;
+    setCreating(true);
+    try {
+      const response = await fetch("/api/admin/hospitals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "创建医院失败");
+      }
+      setItems((previous) => [...previous, { ...data.hospital, _count: { departments: 0, units: 0, users: 0, scheduleTasks: 0 } }]);
+      setName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建医院失败");
+    } finally {
+      setCreating(false);
     }
-    setItems((previous) => [...previous, { ...data.hospital, _count: { departments: 0, units: 0, users: 0, scheduleTasks: 0 } }]);
-    setName("");
   }
 
   async function toggleHospital(hospital: HospitalItem) {
     setError("");
-    const response = await fetch(`/api/admin/hospitals/${hospital.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !hospital.isActive })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "更新医院失败");
-      return;
+    setUpdatingId(hospital.id);
+    try {
+      const response = await fetch(`/api/admin/hospitals/${hospital.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !hospital.isActive })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "更新医院失败");
+      }
+      setItems((previous) => previous.map((item) => (item.id === hospital.id ? { ...item, ...data.hospital } : item)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新医院失败");
+    } finally {
+      setUpdatingId("");
     }
-    setItems((previous) => previous.map((item) => (item.id === hospital.id ? { ...item, ...data.hospital } : item)));
   }
 
   return (
@@ -56,9 +70,9 @@ export function AdminHospitalsClient({ hospitals }: { hospitals: HospitalItem[] 
       </div>
       <form onSubmit={createHospital} className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-table sm:flex-row">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="医院名称" className="focus-ring flex-1 rounded-md border border-slate-300 px-3 py-2" />
-        <button type="submit" disabled={!name.trim()} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-          <Plus size={16} />
-          创建医院
+        <button type="submit" disabled={creating || !name.trim()} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+          {creating ? "创建中" : "创建医院"}
         </button>
       </form>
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -86,8 +100,13 @@ export function AdminHospitalsClient({ hospitals }: { hospitals: HospitalItem[] 
                   <td className="border-b border-slate-100 px-4 py-3">{hospital._count.users}</td>
                   <td className="border-b border-slate-100 px-4 py-3">{hospital._count.scheduleTasks}</td>
                   <td className="border-b border-slate-100 px-4 py-3">
-                    <button onClick={() => void toggleHospital(hospital)} className="focus-ring rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white">
-                      {hospital.isActive ? "停用" : "启用"}
+                    <button
+                      onClick={() => void toggleHospital(hospital)}
+                      disabled={Boolean(updatingId)}
+                      className="focus-ring inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {updatingId === hospital.id ? <Loader2 size={14} className="animate-spin" /> : null}
+                      {updatingId === hospital.id ? "处理中" : hospital.isActive ? "停用" : "启用"}
                     </button>
                   </td>
                 </tr>

@@ -107,6 +107,9 @@ model User {
   @@index([departmentId])
   @@index([unitId])
   @@index([role])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([role, isActive])
 }
 
 model Session {
@@ -176,6 +179,10 @@ model ScheduleTask {
   @@index([createdByUserId])
   @@index([weekStartDate])
   @@index([status])
+  @@index([createdAt])
+  @@index([unitId, createdAt])
+  @@index([departmentId, createdAt])
+  @@index([status, createdAt])
 }
 
 model ScheduleDoctor {
@@ -265,6 +272,7 @@ model StaffTag {
   @@index([unitId])
   @@index([category])
   @@index([active])
+  @@index([unitId, active])
 }
 
 model StaffTagPolicy {
@@ -322,6 +330,7 @@ model StaffProfile {
   @@index([unitId])
   @@index([userId])
   @@index([active])
+  @@index([unitId, active])
 }
 
 model StaffProfileTag {
@@ -379,6 +388,7 @@ model ShiftType {
   @@index([unitId])
   @@index([category])
   @@index([active])
+  @@index([unitId, active])
 }
 
 model ShiftTypeRequiredTag {
@@ -416,6 +426,7 @@ model ScheduleAssignment {
   @@index([departmentId])
   @@index([scheduleTaskId, date, timeSlot])
   @@index([scheduleTaskId, roomNumber])
+  @@index([doctorId])
 }
 
 model ScheduleConflict {
@@ -436,6 +447,7 @@ model ScheduleConflict {
 
   @@index([departmentId])
   @@index([scheduleTaskId])
+  @@index([scheduleTaskId, severity])
   @@index([date, timeSlot])
 }
 
@@ -464,6 +476,10 @@ model Feedback {
   @@index([unitId])
   @@index([status])
   @@index([type])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([unitId, createdAt])
+  @@index([status, createdAt])
 }
 
 model OrganizationRequest {
@@ -481,6 +497,7 @@ model OrganizationRequest {
 
   @@index([requesterUserId])
   @@index([status])
+  @@index([createdAt])
 }
 
 model AuditLog {

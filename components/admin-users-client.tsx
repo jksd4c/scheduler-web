@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 const USER_ROLE = {
   SUPER_ADMIN: "SUPER_ADMIN",
@@ -48,39 +48,53 @@ export function AdminUsersClient({ users, units }: { users: UserItem[]; units: U
   const [role, setRole] = useState<string>(USER_ROLE.SCHEDULER_ADMIN);
   const [unitId, setUnitId] = useState(units[0]?.id ?? "");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [updatingUserId, setUpdatingUserId] = useState("");
 
   async function createUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const response = await fetch("/api/admin/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, displayName, password, role, unitId })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "创建用户失败");
-      return;
+    setCreating(true);
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, displayName, password, role, unitId })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "创建用户失败");
+      }
+      setItems((previous) => [...previous, data.user]);
+      setUsername("");
+      setDisplayName("");
+      setPassword("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建用户失败");
+    } finally {
+      setCreating(false);
     }
-    setItems((previous) => [...previous, data.user]);
-    setUsername("");
-    setDisplayName("");
-    setPassword("");
   }
 
   async function updateUser(id: string, payload: Record<string, unknown>) {
     setError("");
-    const response = await fetch(`/api/admin/users/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "更新用户失败");
-      return;
+    setUpdatingUserId(id);
+    try {
+      const response = await fetch(`/api/admin/users/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "更新用户失败");
+      }
+      setItems((previous) => previous.map((item) => (item.id === id ? { ...item, ...data.user } : item)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新用户失败");
+    } finally {
+      setUpdatingUserId("");
     }
-    setItems((previous) => previous.map((item) => (item.id === id ? { ...item, ...data.user } : item)));
   }
 
   return (
@@ -106,9 +120,9 @@ export function AdminUsersClient({ users, units }: { users: UserItem[]; units: U
             </option>
           ))}
         </select>
-        <button type="submit" disabled={!username.trim() || password.length < 8 || (role !== USER_ROLE.SUPER_ADMIN && !unitId)} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-          <Plus size={16} />
-          创建
+        <button type="submit" disabled={creating || !username.trim() || password.length < 8 || (role !== USER_ROLE.SUPER_ADMIN && !unitId)} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+          {creating ? "创建中" : "创建"}
         </button>
       </form>
 
@@ -148,8 +162,13 @@ export function AdminUsersClient({ users, units }: { users: UserItem[]; units: U
                   </td>
                   <td className="border-b border-slate-100 px-4 py-3 text-slate-600">{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString("zh-CN") : "-"}</td>
                   <td className="border-b border-slate-100 px-4 py-3">
-                    <button onClick={() => void updateUser(user.id, { isActive: !user.isActive })} className="focus-ring rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white">
-                      {user.isActive ? "停用" : "启用"}
+                    <button
+                      onClick={() => void updateUser(user.id, { isActive: !user.isActive })}
+                      disabled={Boolean(updatingUserId)}
+                      className="focus-ring inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {updatingUserId === user.id ? <Loader2 size={14} className="animate-spin" /> : null}
+                      {updatingUserId === user.id ? "处理中" : user.isActive ? "停用" : "启用"}
                     </button>
                   </td>
                 </tr>

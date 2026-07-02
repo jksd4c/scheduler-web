@@ -1,23 +1,37 @@
 import Link from "next/link";
+import { PaginationLinks } from "@/components/pagination-links";
 import { requirePageSuperAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export default async function AdminAuditLogsPage() {
+const PAGE_SIZE = 30;
+
+export default async function AdminAuditLogsPage({ searchParams }: { searchParams?: { page?: string } }) {
   const user = await requirePageSuperAdmin();
   if (!user) {
     return <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">无权限访问</div>;
   }
 
-  const logs = await prisma.auditLog.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    include: {
-      actorUser: { select: { username: true, displayName: true } },
-      hospital: true,
-      department: true,
-      unit: true
-    }
-  });
+  const page = Math.max(1, Number(searchParams?.page ?? 1) || 1);
+  const [logs, totalLogs] = await Promise.all([
+    prisma.auditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      select: {
+        id: true,
+        action: true,
+        targetType: true,
+        targetId: true,
+        reason: true,
+        createdAt: true,
+        actorUser: { select: { username: true, displayName: true } },
+        hospital: { select: { name: true } },
+        department: { select: { name: true } },
+        unit: { select: { name: true } }
+      }
+    }),
+    prisma.auditLog.count()
+  ]);
 
   return (
     <div className="space-y-4">
@@ -27,7 +41,7 @@ export default async function AdminAuditLogsPage() {
       <section className="space-y-4">
         <div>
           <h2 className="text-2xl font-semibold text-slate-950">审计日志</h2>
-          <p className="mt-1 text-sm text-slate-600">展示最近 200 条关键操作记录。</p>
+          <p className="mt-1 text-sm text-slate-600">按时间分页查看关键操作记录，默认每页 {PAGE_SIZE} 条。</p>
         </div>
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
           <div className="table-scroll">
@@ -65,6 +79,7 @@ export default async function AdminAuditLogsPage() {
             </table>
           </div>
         </div>
+        <PaginationLinks basePath="/admin/audit-logs" page={page} pageSize={PAGE_SIZE} total={totalLogs} label="审计日志" />
       </section>
     </div>
   );

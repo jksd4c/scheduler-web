@@ -54,19 +54,25 @@ export function ShiftTypesClient() {
   const [shiftTypes, setShiftTypes] = useState<ShiftType[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [form, setForm] = useState(emptyForm());
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const editing = Boolean(form.id);
 
   async function load() {
-    const [shiftResponse, tagResponse] = await Promise.all([
-      fetch("/api/shift-types", { cache: "no-store" }),
-      fetch("/api/staff-tags", { cache: "no-store" })
-    ]);
-    const shiftData = await shiftResponse.json();
-    const tagData = await tagResponse.json();
-    setShiftTypes(shiftData.shiftTypes ?? []);
-    setTags((tagData.tags ?? []).filter((tag: any) => tag.active));
+    setLoading(true);
+    try {
+      const [shiftResponse, tagResponse] = await Promise.all([
+        fetch("/api/shift-types", { cache: "no-store" }),
+        fetch("/api/staff-tags", { cache: "no-store" })
+      ]);
+      const shiftData = await shiftResponse.json();
+      const tagData = await tagResponse.json();
+      setShiftTypes(shiftData.shiftTypes ?? []);
+      setTags((tagData.tags ?? []).filter((tag: any) => tag.active));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -123,6 +129,7 @@ export function ShiftTypesClient() {
 
   return (
     <section className="space-y-5">
+      {loading ? <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">正在加载班次类型...</div> : null}
       <div>
         <h2 className="text-2xl font-semibold text-slate-950">班次身份要求</h2>
         <p className="mt-1 text-sm text-slate-600">配置班次类型，并指定 REQUIRED / FORBIDDEN / ALLOWED 身份规则。排班需求绑定班次后会自动应用这些限制。</p>

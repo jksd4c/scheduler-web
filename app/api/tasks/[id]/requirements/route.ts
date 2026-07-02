@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { dateFromKey, getWeekDates } from "@/lib/date-utils";
@@ -29,8 +30,11 @@ type IncomingRequirement = {
 const VALID_SLOTS = new Set<string>([TIME_SLOT.FULL_DAY, TIME_SLOT.MORNING, TIME_SLOT.AFTERNOON]);
 
 export async function PUT(request: Request, { params }: { params: { id: string } }) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const { user } = await requireScheduleTaskAccess(params.id);
+    role = user.role;
     const body = await request.json();
     const records = Array.isArray(body.records) ? (body.records as IncomingRequirement[]) : [];
     const task = await prisma.scheduleTask.findUnique({
@@ -39,7 +43,11 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     });
 
     if (!task) {
-      return NextResponse.json({ message: "排班任务不存在" }, { status: 404 });
+      return withApiTiming(NextResponse.json({ message: "排班任务不存在" }, { status: 404 }), {
+        route: "PUT /api/tasks/[id]/requirements",
+        start,
+        role
+      });
     }
 
     const mode = asScheduleMode(task.mode);
@@ -69,32 +77,20 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     for (const record of records) {
       const date = String(record.date ?? "").slice(0, 10);
       const timeSlot = record.timeSlot;
-      if (!date || !timeSlot || !VALID_SLOTS.has(timeSlot)) {
-        continue;
-      }
-      if (mode === SCHEDULE_MODE.FULL_DAY && timeSlot !== TIME_SLOT.FULL_DAY) {
-        continue;
-      }
-      if (mode === SCHEDULE_MODE.HALF_DAY && timeSlot === TIME_SLOT.FULL_DAY) {
-        continue;
-      }
+      if (!date || !timeSlot || !VALID_SLOTS.has(timeSlot)) continue;
+      if (mode === SCHEDULE_MODE.FULL_DAY && timeSlot !== TIME_SLOT.FULL_DAY) continue;
+      if (mode === SCHEDULE_MODE.HALF_DAY && timeSlot === TIME_SLOT.FULL_DAY) continue;
 
       const weekday = weekdayByDate.get(date);
-      if (!weekday) {
-        continue;
-      }
+      if (!weekday) continue;
 
       const roomNumber = clampRoomCount(Number(record.roomNumber ?? 0));
       const requiredDoctors = clampRequiredDoctors(Number(record.requiredDoctors ?? 1));
       const enabled = Boolean(record.enabled) && roomNumber > 0 && requiredDoctors > 0;
-      if (!enabled) {
-        continue;
-      }
+      if (!enabled) continue;
 
       const key = `${date}:${timeSlot}:${roomNumber}`;
-      if (dedupe.has(key)) {
-        continue;
-      }
+      if (dedupe.has(key)) continue;
       dedupe.add(key);
 
       data.push({
@@ -135,12 +131,21 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       afterJson: { requirementCount: data.length },
       request
     });
-    return NextResponse.json({ task: updated });
+    return withApiTiming(NextResponse.json({ task: updated }), {
+      route: "PUT /api/tasks/[id]/requirements",
+      start,
+      role
+    });
   } catch (error) {
     if (error instanceof Error && "status" in error) {
-      return authErrorResponse(error);
+      const response = authErrorResponse(error);
+      return withApiTiming(response, { route: "PUT /api/tasks/[id]/requirements", start, role });
     }
     console.error(error);
-    return NextResponse.json({ message: "保存排班规则失败" }, { status: 500 });
+    return withApiTiming(NextResponse.json({ message: "保存排班规则失败" }, { status: 500 }), {
+      route: "PUT /api/tasks/[id]/requirements",
+      start,
+      role
+    });
   }
 }

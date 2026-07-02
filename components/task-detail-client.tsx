@@ -6,6 +6,7 @@ import {
   CalendarX,
   Download,
   FileSpreadsheet,
+  Loader2,
   Pencil,
   RefreshCw,
   Save,
@@ -37,7 +38,7 @@ import {
 
 type TabId = "requirements" | "unavailable" | "generate" | "schedule" | "adjust" | "export";
 type ScheduleView = "room" | "doctor";
-type BusyState = "load" | "save-requirements" | "save-unavailable" | "delete-result" | "generate" | "manual" | "";
+type BusyState = "load" | "save-requirements" | "save-unavailable" | "delete-result" | "generate" | "manual" | "export" | "";
 
 type UnavailableDraft = Record<string, Record<string, { morning: boolean; afternoon: boolean }>>;
 type RequirementSlotDraft = { enabled: boolean; rooms: number; requiredDoctors: number; shiftTypeId?: string };
@@ -375,6 +376,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
 
   async function clearScheduleResult() {
     if (!task) return;
+    if (busy === "delete-result") return;
     if (!window.confirm("确认清空当前排班结果吗？人员名单、不可排班时间和排班规则将保留。")) return;
     setBusy("delete-result");
     setError("");
@@ -387,6 +389,34 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
       setNotice("排班结果已清空，可以重新生成。");
     } catch (err) {
       setError(err instanceof Error ? err.message : "清空排班结果失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function exportExcel() {
+    if (!task || busy === "export") return;
+    setBusy("export");
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/export`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message ?? "导出 Excel 失败");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `fair-schedule_${toDateKey(task.weekStartDate)}_to_${toDateKey(task.weekEndDate)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice("Excel 已开始下载。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "导出 Excel 失败");
     } finally {
       setBusy("");
     }
@@ -1031,9 +1061,10 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 <button
                   onClick={() => void clearScheduleResult()}
                   disabled={busy === "delete-result"}
-                  className="focus-ring rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:bg-slate-100"
+                  className="focus-ring inline-flex items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-slate-100"
                 >
-                  清空排班结果
+                  {busy === "delete-result" ? <Loader2 size={16} className="animate-spin" /> : null}
+                  {busy === "delete-result" ? "清空中" : "清空排班结果"}
                 </button>
               ) : null}
               <button
@@ -1041,7 +1072,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 disabled={busy === "generate" || requirementCells.length === 0}
                 className="focus-ring inline-flex w-fit items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:bg-slate-300"
               >
-                <Wand2 size={16} />
+                {busy === "generate" ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
                 {busy === "generate" ? "正在生成..." : task.assignments.length ? "重新生成" : "生成排班"}
               </button>
             </div>
@@ -1059,8 +1090,13 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             <h3 className="text-lg font-semibold text-slate-950">排班表</h3>
             <div className="flex flex-wrap gap-2">
               {hasScheduleResult ? (
-                <button onClick={() => void clearScheduleResult()} className="focus-ring rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50">
-                  清空排班结果
+                <button
+                  onClick={() => void clearScheduleResult()}
+                  disabled={busy === "delete-result"}
+                  className="focus-ring inline-flex items-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-slate-100"
+                >
+                  {busy === "delete-result" ? <Loader2 size={16} className="animate-spin" /> : null}
+                  {busy === "delete-result" ? "清空中" : "清空排班结果"}
                 </button>
               ) : null}
               <div className="inline-flex rounded-md border border-slate-300 bg-white p-1">
@@ -1102,10 +1138,15 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 <div>
                   <h3 className="text-lg font-semibold text-slate-950">导出 Excel</h3>
                   <p className="mt-1 text-sm text-slate-600">文件包含动态单元排班表、人员个人统计和冲突报告。</p>
-                  <a href={`/api/tasks/${task.id}/export`} className="focus-ring mt-4 inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800">
-                    <FileSpreadsheet size={16} />
-                    导出 Excel
-                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void exportExcel()}
+                    disabled={busy === "export"}
+                    className="focus-ring mt-4 inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {busy === "export" ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+                    {busy === "export" ? "导出中" : "导出 Excel"}
+                  </button>
                 </div>
               </div>
             </div>

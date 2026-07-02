@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -15,16 +16,31 @@ const shiftInclude = {
 };
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const current = await prisma.shiftType.findUnique({ where: { id: params.id }, include: shiftInclude });
-    if (!current) return NextResponse.json({ message: "班次类型不存在" }, { status: 404 });
+    if (!current) {
+      return withApiTiming(NextResponse.json({ message: "班次类型不存在" }, { status: 404 }), {
+        route: "PATCH /api/shift-types/[id]",
+        start,
+        role
+      });
+    }
     const { user, unit } = await requireManagedUnit(current.unitId);
+    role = user.role;
     const body = await request.json();
 
     const data: Record<string, unknown> = {};
     if ("name" in body) {
       const name = String(body.name ?? "").trim();
-      if (!name) return NextResponse.json({ message: "请填写班次名称" }, { status: 400 });
+      if (!name) {
+        return withApiTiming(NextResponse.json({ message: "请填写班次名称" }, { status: 400 }), {
+          route: "PATCH /api/shift-types/[id]",
+          start,
+          role
+        });
+      }
       data.name = name;
     }
     if ("category" in body) data.category = normalizeShiftCategory(body.category);
@@ -58,11 +74,22 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       request
     });
 
-    return NextResponse.json({ shiftType: updated });
+    return withApiTiming(NextResponse.json({ shiftType: updated }), {
+      route: "PATCH /api/shift-types/[id]",
+      start,
+      role
+    });
   } catch (error) {
-    if (error instanceof Error && "status" in error) return authErrorResponse(error);
+    if (error instanceof Error && "status" in error) {
+      const response = authErrorResponse(error);
+      return withApiTiming(response, { route: "PATCH /api/shift-types/[id]", start, role });
+    }
     console.error(error);
-    return NextResponse.json({ message: "更新班次类型失败" }, { status: 500 });
+    return withApiTiming(NextResponse.json({ message: "更新班次类型失败" }, { status: 500 }), {
+      route: "PATCH /api/shift-types/[id]",
+      start,
+      role
+    });
   }
 }
 

@@ -69,14 +69,20 @@ function emptyForm() {
 export function StaffTagsClient() {
   const [tags, setTags] = useState<StaffTag[]>([]);
   const [form, setForm] = useState(emptyForm());
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const editing = Boolean(form.id);
 
   async function load() {
-    const response = await fetch("/api/staff-tags", { cache: "no-store" });
-    const data = await response.json();
-    setTags(data.tags ?? []);
+    setLoading(true);
+    try {
+      const response = await fetch("/api/staff-tags", { cache: "no-store" });
+      const data = await response.json();
+      setTags(data.tags ?? []);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -119,6 +125,7 @@ export function StaffTagsClient() {
 
   return (
     <section className="space-y-5">
+      {loading ? <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">正在加载身份策略...</div> : null}
       <div>
         <h2 className="text-2xl font-semibold text-slate-950">人员身份与策略</h2>
         <p className="mt-1 text-sm text-slate-600">身份由本病区自定义，可作为显示标签，也可影响自动排班候选池。</p>

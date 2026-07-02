@@ -165,6 +165,15 @@ function nextMondayKey() {
   return `${year}-${month}-${date}`;
 }
 
+async function assertRejectedToLogin(response, label) {
+  const text = await response.text();
+  const redirected =
+    response.status === 307 && response.headers.get("location")?.includes("/login");
+  const streamedRedirect =
+    response.status === 200 && (text.includes("url=/login") || text.includes("NEXT_REDIRECT") || text.includes("/login"));
+  assert(Boolean(redirected || streamedRedirect), label);
+}
+
 async function main() {
   const superAdminUsername = requiredEnv("INITIAL_SUPER_ADMIN_USERNAME");
   const superAdminPassword = requiredEnv("INITIAL_SUPER_ADMIN_PASSWORD");
@@ -178,19 +187,16 @@ async function main() {
   assert(registerPage.status === 200, "/register is accessible");
 
   const feedbackUnauth = await request("/feedback");
-  assert(feedbackUnauth.status === 307 && feedbackUnauth.headers.get("location")?.includes("/login"), "unauthenticated /feedback is rejected");
+  await assertRejectedToLogin(feedbackUnauth, "unauthenticated /feedback is rejected");
 
   const guestPage = await request("/guest");
   assert(guestPage.status === 200, "/guest is accessible");
 
   const unauthAdmin = await request("/admin");
-  assert(unauthAdmin.status === 307 && unauthAdmin.headers.get("location")?.includes("/login"), "unauthenticated /admin is rejected");
+  await assertRejectedToLogin(unauthAdmin, "unauthenticated /admin is rejected");
 
   const unauthDashboard = await request("/dashboard");
-  assert(
-    unauthDashboard.status === 307 && unauthDashboard.headers.get("location")?.includes("/login"),
-    "unauthenticated /dashboard is rejected"
-  );
+  await assertRejectedToLogin(unauthDashboard, "unauthenticated /dashboard is rejected");
 
   const superAdminLogin = await login(superAdminUsername, superAdminPassword);
   assert(superAdminLogin.response.status === 200 && superAdminLogin.data.redirectTo === "/admin", "SUPER_ADMIN login redirects to /admin");

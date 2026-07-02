@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 type DepartmentOption = { id: string; name: string; hospital?: { name: string } | null };
 type UnitItem = {
@@ -20,44 +20,58 @@ export function AdminUnitsClient({ units, departments }: { units: UnitItem[]; de
   const [departmentId, setDepartmentId] = useState(departments[0]?.id ?? "");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [updatingId, setUpdatingId] = useState("");
 
   async function createUnit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const response = await fetch("/api/admin/units", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ departmentId, name })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "创建病区失败");
-      return;
+    setCreating(true);
+    try {
+      const response = await fetch("/api/admin/units", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ departmentId, name })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "创建病区/小组失败");
+      }
+      setItems((previous) => [...previous, { ...data.unit, _count: { users: 0, scheduleTasks: 0 } }]);
+      setName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建病区/小组失败");
+    } finally {
+      setCreating(false);
     }
-    setItems((previous) => [...previous, { ...data.unit, _count: { users: 0, scheduleTasks: 0 } }]);
-    setName("");
   }
 
   async function toggleUnit(unit: UnitItem) {
     setError("");
-    const response = await fetch(`/api/admin/units/${unit.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !unit.isActive })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "更新病区失败");
-      return;
+    setUpdatingId(unit.id);
+    try {
+      const response = await fetch(`/api/admin/units/${unit.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !unit.isActive })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "更新病区/小组失败");
+      }
+      setItems((previous) => previous.map((item) => (item.id === unit.id ? { ...item, ...data.unit } : item)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新病区/小组失败");
+    } finally {
+      setUpdatingId("");
     }
-    setItems((previous) => previous.map((item) => (item.id === unit.id ? { ...item, ...data.unit } : item)));
   }
 
   return (
     <section className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold text-slate-950">病区/小组管理</h2>
-        <p className="mt-1 text-sm text-slate-600">测试服注册用户可在已有医院和科室下创建自己的病区。</p>
+        <p className="mt-1 text-sm text-slate-600">测试服注册用户可在已有医院和科室下创建自己的病区/小组。</p>
       </div>
       <form onSubmit={createUnit} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-table sm:grid-cols-[260px_1fr_auto]">
         <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2">
@@ -68,9 +82,9 @@ export function AdminUnitsClient({ units, departments }: { units: UnitItem[]; de
           ))}
         </select>
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="病区/小组名称" className="focus-ring rounded-md border border-slate-300 px-3 py-2" />
-        <button type="submit" disabled={!name.trim() || !departmentId} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-          <Plus size={16} />
-          创建病区
+        <button type="submit" disabled={creating || !name.trim() || !departmentId} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+          {creating ? "创建中" : "创建病区"}
         </button>
       </form>
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -98,8 +112,13 @@ export function AdminUnitsClient({ units, departments }: { units: UnitItem[]; de
                   <td className="border-b border-slate-100 px-4 py-3">{unit._count.scheduleTasks}</td>
                   <td className="border-b border-slate-100 px-4 py-3">{unit.isActive ? "启用" : "停用"}</td>
                   <td className="border-b border-slate-100 px-4 py-3">
-                    <button onClick={() => void toggleUnit(unit)} className="focus-ring rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white">
-                      {unit.isActive ? "停用" : "启用"}
+                    <button
+                      onClick={() => void toggleUnit(unit)}
+                      disabled={Boolean(updatingId)}
+                      className="focus-ring inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {updatingId === unit.id ? <Loader2 size={14} className="animate-spin" /> : null}
+                      {updatingId === unit.id ? "处理中" : unit.isActive ? "停用" : "启用"}
                     </button>
                   </td>
                 </tr>

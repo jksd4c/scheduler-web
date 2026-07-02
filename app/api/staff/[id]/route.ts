@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -17,17 +18,32 @@ const staffInclude = {
 };
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const current = await prisma.staffProfile.findUnique({ where: { id: params.id }, include: staffInclude });
-    if (!current) return NextResponse.json({ message: "人员不存在" }, { status: 404 });
+    if (!current) {
+      return withApiTiming(NextResponse.json({ message: "人员不存在" }, { status: 404 }), {
+        route: "PATCH /api/staff/[id]",
+        start,
+        role
+      });
+    }
     const { user, unit } = await requireManagedUnit(current.unitId);
+    role = user.role;
     const body = await request.json();
     const tagIds = Array.isArray(body.tagIds) ? await validateUnitTagIds(unit.id, body.tagIds) : null;
 
     const data: Record<string, unknown> = {};
     if ("displayName" in body) {
       const name = String(body.displayName ?? "").trim();
-      if (!name) return NextResponse.json({ message: "请填写姓名" }, { status: 400 });
+      if (!name) {
+        return withApiTiming(NextResponse.json({ message: "请填写姓名" }, { status: 400 }), {
+          route: "PATCH /api/staff/[id]",
+          start,
+          role
+        });
+      }
       data.displayName = name;
     }
     if ("phone" in body) data.phone = nullableString(body.phone);
@@ -39,12 +55,13 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       await tx.staffProfile.update({ where: { id: current.id }, data });
       if (tagIds) {
         await tx.staffProfileTag.deleteMany({ where: { staffProfileId: current.id, staffTagId: { notIn: tagIds } } });
-        for (const staffTagId of tagIds) {
-          await tx.staffProfileTag.upsert({
-            where: { staffProfileId_staffTagId: { staffProfileId: current.id, staffTagId } },
-            create: { staffProfileId: current.id, staffTagId },
-            update: {}
+        if (tagIds.length) {
+          await tx.staffProfileTag.createMany({
+            data: tagIds.map((staffTagId) => ({ staffProfileId: current.id, staffTagId })),
+            skipDuplicates: true
           });
+        } else {
+          await tx.staffProfileTag.deleteMany({ where: { staffProfileId: current.id } });
         }
       }
     });
@@ -63,11 +80,22 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       request
     });
 
-    return NextResponse.json({ staff: updated ? serializeStaffProfile(updated) : null });
+    return withApiTiming(NextResponse.json({ staff: updated ? serializeStaffProfile(updated) : null }), {
+      route: "PATCH /api/staff/[id]",
+      start,
+      role
+    });
   } catch (error) {
-    if (error instanceof Error && "status" in error) return authErrorResponse(error);
+    if (error instanceof Error && "status" in error) {
+      const response = authErrorResponse(error);
+      return withApiTiming(response, { route: "PATCH /api/staff/[id]", start, role });
+    }
     console.error(error);
-    return NextResponse.json({ message: "更新人员失败" }, { status: 500 });
+    return withApiTiming(NextResponse.json({ message: "更新人员失败" }, { status: 500 }), {
+      route: "PATCH /api/staff/[id]",
+      start,
+      role
+    });
   }
 }
 

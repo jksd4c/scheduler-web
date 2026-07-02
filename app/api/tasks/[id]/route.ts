@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -7,21 +8,32 @@ import { getTaskDetail } from "@/lib/tasks";
 export const runtime = "nodejs";
 
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
-    await requireScheduleTaskAccess(params.id);
+    const { user } = await requireScheduleTaskAccess(params.id);
+    role = user.role;
     const task = await getTaskDetail(params.id);
     if (!task) {
-      return NextResponse.json({ message: "排班任务不存在" }, { status: 404 });
+      return withApiTiming(NextResponse.json({ message: "排班任务不存在" }, { status: 404 }), {
+        route: "GET /api/tasks/[id]",
+        start,
+        role
+      });
     }
-    return NextResponse.json({ task });
+    return withApiTiming(NextResponse.json({ task }), { route: "GET /api/tasks/[id]", start, role });
   } catch (error) {
-    return authErrorResponse(error);
+    const response = authErrorResponse(error);
+    return withApiTiming(response, { route: "GET /api/tasks/[id]", start, role });
   }
 }
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const { user, task } = await requireScheduleTaskAccess(params.id);
+    role = user.role;
 
     await prisma.$transaction([
       prisma.scheduleAssignment.deleteMany({ where: { scheduleTaskId: task.id } }),
@@ -44,8 +56,9 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
       request
     });
 
-    return NextResponse.json({ ok: true });
+    return withApiTiming(NextResponse.json({ ok: true }), { route: "DELETE /api/tasks/[id]", start, role });
   } catch (error) {
-    return authErrorResponse(error);
+    const response = authErrorResponse(error);
+    return withApiTiming(response, { route: "DELETE /api/tasks/[id]", start, role });
   }
 }

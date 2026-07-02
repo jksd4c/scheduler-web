@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -15,26 +16,39 @@ const shiftInclude = {
 };
 
 export async function GET(request: Request) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const url = new URL(request.url);
-    const { unit } = await requireManagedUnit(url.searchParams.get("unitId"));
+    const { user, unit } = await requireManagedUnit(url.searchParams.get("unitId"));
+    role = user.role;
     const shiftTypes = await prisma.shiftType.findMany({
       where: { unitId: unit.id },
       include: shiftInclude,
       orderBy: [{ active: "desc" }, { createdAt: "asc" }]
     });
-    return NextResponse.json({ shiftTypes });
+    return withApiTiming(NextResponse.json({ shiftTypes }), { route: "GET /api/shift-types", start, role });
   } catch (error) {
-    return authErrorResponse(error);
+    const response = authErrorResponse(error);
+    return withApiTiming(response, { route: "GET /api/shift-types", start, role });
   }
 }
 
 export async function POST(request: Request) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const body = await request.json();
     const { user, unit } = await requireManagedUnit(body.unitId);
+    role = user.role;
     const name = String(body.name ?? "").trim();
-    if (!name) return NextResponse.json({ message: "请填写班次名称" }, { status: 400 });
+    if (!name) {
+      return withApiTiming(NextResponse.json({ message: "请填写班次名称" }, { status: 400 }), {
+        route: "POST /api/shift-types",
+        start,
+        role
+      });
+    }
     const rules = await normalizeTagRules(unit.id, body.requiredTags);
 
     const shiftType = await prisma.shiftType.create({
@@ -65,11 +79,22 @@ export async function POST(request: Request) {
       request
     });
 
-    return NextResponse.json({ shiftType }, { status: 201 });
+    return withApiTiming(NextResponse.json({ shiftType }, { status: 201 }), {
+      route: "POST /api/shift-types",
+      start,
+      role
+    });
   } catch (error) {
-    if (error instanceof Error && "status" in error) return authErrorResponse(error);
+    if (error instanceof Error && "status" in error) {
+      const response = authErrorResponse(error);
+      return withApiTiming(response, { route: "POST /api/shift-types", start, role });
+    }
     console.error(error);
-    return NextResponse.json({ message: "保存班次类型失败，可能存在同名班次" }, { status: 500 });
+    return withApiTiming(NextResponse.json({ message: "保存班次类型失败，可能存在同名班次" }, { status: 500 }), {
+      route: "POST /api/shift-types",
+      start,
+      role
+    });
   }
 }
 

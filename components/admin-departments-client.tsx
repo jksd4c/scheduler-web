@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 
 type HospitalOption = { id: string; name: string; isActive: boolean };
 
@@ -20,37 +20,51 @@ export function AdminDepartmentsClient({ departments, hospitals }: { departments
   const [name, setName] = useState("");
   const [hospitalId, setHospitalId] = useState(hospitals[0]?.id ?? "");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [updatingId, setUpdatingId] = useState("");
 
   async function createDepartment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const response = await fetch("/api/admin/departments", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, hospitalId })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "创建科室失败");
-      return;
+    setCreating(true);
+    try {
+      const response = await fetch("/api/admin/departments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, hospitalId })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "创建科室失败");
+      }
+      setItems((previous) => [...previous, { ...data.department, _count: { users: 0, units: 0, scheduleTasks: 0 } }]);
+      setName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建科室失败");
+    } finally {
+      setCreating(false);
     }
-    setItems((previous) => [...previous, { ...data.department, _count: { users: 0, units: 0, scheduleTasks: 0 } }]);
-    setName("");
   }
 
   async function toggleDepartment(department: DepartmentItem) {
     setError("");
-    const response = await fetch(`/api/admin/departments/${department.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !department.isActive })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "更新科室失败");
-      return;
+    setUpdatingId(department.id);
+    try {
+      const response = await fetch(`/api/admin/departments/${department.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !department.isActive })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "更新科室失败");
+      }
+      setItems((previous) => previous.map((item) => (item.id === department.id ? { ...item, ...data.department } : item)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "更新科室失败");
+    } finally {
+      setUpdatingId("");
     }
-    setItems((previous) => previous.map((item) => (item.id === department.id ? { ...item, ...data.department } : item)));
   }
 
   return (
@@ -68,9 +82,9 @@ export function AdminDepartmentsClient({ departments, hospitals }: { departments
           ))}
         </select>
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="科室名称" className="focus-ring rounded-md border border-slate-300 px-3 py-2" />
-        <button type="submit" disabled={!name.trim() || !hospitalId} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-          <Plus size={16} />
-          创建科室
+        <button type="submit" disabled={creating || !name.trim() || !hospitalId} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+          {creating ? "创建中" : "创建科室"}
         </button>
       </form>
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -98,8 +112,13 @@ export function AdminDepartmentsClient({ departments, hospitals }: { departments
                   <td className="border-b border-slate-100 px-4 py-3">{department._count.users}</td>
                   <td className="border-b border-slate-100 px-4 py-3">{department._count.scheduleTasks}</td>
                   <td className="border-b border-slate-100 px-4 py-3">
-                    <button onClick={() => void toggleDepartment(department)} className="focus-ring rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white">
-                      {department.isActive ? "停用" : "启用"}
+                    <button
+                      onClick={() => void toggleDepartment(department)}
+                      disabled={Boolean(updatingId)}
+                      className="focus-ring inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      {updatingId === department.id ? <Loader2 size={14} className="animate-spin" /> : null}
+                      {updatingId === department.id ? "处理中" : department.isActive ? "停用" : "启用"}
                     </button>
                   </td>
                 </tr>

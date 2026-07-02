@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyRound, Plus, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type AccessCodeItem = {
@@ -14,13 +14,18 @@ export function AccessCodeManager() {
   const [codes, setCodes] = useState<AccessCodeItem[]>([]);
   const [plainCode, setPlainCode] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [revokingId, setRevokingId] = useState("");
 
   async function loadCodes() {
+    setLoading(true);
     const response = await fetch("/api/access-codes", { cache: "no-store" });
     const data = await response.json();
     if (response.ok) {
       setCodes(data.codes);
     }
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -30,25 +35,38 @@ export function AccessCodeManager() {
   async function createCode() {
     setError("");
     setPlainCode("");
-    const response = await fetch("/api/access-codes", { method: "POST" });
-    const data = await response.json();
-    if (!response.ok) {
-      setError(data.message ?? "生成查看密码失败");
-      return;
+    setCreating(true);
+    try {
+      const response = await fetch("/api/access-codes", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message ?? "生成查看密码失败");
+      }
+      setPlainCode(data.plainCode);
+      await loadCodes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "生成查看密码失败");
+    } finally {
+      setCreating(false);
     }
-    setPlainCode(data.plainCode);
-    await loadCodes();
   }
 
   async function revokeCode(id: string) {
-    if (!window.confirm("确认作废这个排班查看密码吗？")) return;
-    const response = await fetch(`/api/access-codes/${id}`, { method: "DELETE" });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      setError(data.message ?? "作废失败");
-      return;
+    if (revokingId || !window.confirm("确认作废这个排班查看密码吗？")) return;
+    setError("");
+    setRevokingId(id);
+    try {
+      const response = await fetch(`/api/access-codes/${id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message ?? "作废失败");
+      }
+      await loadCodes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "作废失败");
+    } finally {
+      setRevokingId("");
     }
-    await loadCodes();
   }
 
   return (
@@ -58,9 +76,9 @@ export function AccessCodeManager() {
           <h3 className="text-lg font-semibold text-slate-950">排班查看密码</h3>
           <p className="mt-1 text-sm text-slate-600">密码默认有效 30 天，明文只在生成后显示一次。</p>
         </div>
-        <button type="button" onClick={() => void createCode()} className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-3 py-2 text-sm font-medium text-white hover:bg-teal-800">
-          <Plus size={16} />
-          生成查看密码
+        <button type="button" onClick={() => void createCode()} disabled={creating} className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-3 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+          {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+          {creating ? "生成中" : "生成查看密码"}
         </button>
       </div>
       {plainCode ? (
@@ -80,7 +98,13 @@ export function AccessCodeManager() {
             </tr>
           </thead>
           <tbody>
-            {codes.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                  正在加载查看密码...
+                </td>
+              </tr>
+            ) : codes.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
                   暂无查看密码
@@ -98,9 +122,9 @@ export function AccessCodeManager() {
                     </span>
                   </td>
                   <td className="border-b border-slate-100 px-3 py-2">
-                    <button type="button" onClick={() => void revokeCode(code.id)} disabled={!code.isActive} className="focus-ring inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
-                      <Trash2 size={14} />
-                      作废
+                    <button type="button" onClick={() => void revokeCode(code.id)} disabled={!code.isActive || Boolean(revokingId)} className="focus-ring inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">
+                      {revokingId === code.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      {revokingId === code.id ? "作废中" : "作废"}
                     </button>
                   </td>
                 </tr>

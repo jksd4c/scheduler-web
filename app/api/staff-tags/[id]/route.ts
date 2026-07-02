@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
@@ -7,10 +8,19 @@ import { normalizeTagCategory } from "@/lib/staff-policy";
 export const runtime = "nodejs";
 
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const start = nowMs();
+  let role: string | null = null;
   try {
     const current = await prisma.staffTag.findUnique({ where: { id: params.id }, include: { policy: true, unit: true } });
-    if (!current) return NextResponse.json({ message: "身份不存在" }, { status: 404 });
+    if (!current) {
+      return withApiTiming(NextResponse.json({ message: "身份不存在" }, { status: 404 }), {
+        route: "PATCH /api/staff-tags/[id]",
+        start,
+        role
+      });
+    }
     const { user, unit } = await requireManagedUnit(current.unitId);
+    role = user.role;
     const body = await request.json();
 
     const data: Record<string, unknown> = {};
@@ -21,7 +31,11 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if ("sortOrder" in body) data.sortOrder = normalizeInt(body.sortOrder, current.sortOrder);
 
     if (typeof data.name === "string" && !data.name) {
-      return NextResponse.json({ message: "请填写身份名称" }, { status: 400 });
+      return withApiTiming(NextResponse.json({ message: "请填写身份名称" }, { status: 400 }), {
+        route: "PATCH /api/staff-tags/[id]",
+        start,
+        role
+      });
     }
 
     const policy = normalizePolicyInput(body.policy ?? current.policy ?? {});
@@ -64,11 +78,22 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       request
     });
 
-    return NextResponse.json({ tag: updated });
+    return withApiTiming(NextResponse.json({ tag: updated }), {
+      route: "PATCH /api/staff-tags/[id]",
+      start,
+      role
+    });
   } catch (error) {
-    if (error instanceof Error && "status" in error) return authErrorResponse(error);
+    if (error instanceof Error && "status" in error) {
+      const response = authErrorResponse(error);
+      return withApiTiming(response, { route: "PATCH /api/staff-tags/[id]", start, role });
+    }
     console.error(error);
-    return NextResponse.json({ message: "更新身份失败" }, { status: 500 });
+    return withApiTiming(NextResponse.json({ message: "更新身份失败" }, { status: 500 }), {
+      route: "PATCH /api/staff-tags/[id]",
+      start,
+      role
+    });
   }
 }
 
