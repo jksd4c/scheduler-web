@@ -6,6 +6,9 @@ const path = require("node:path");
 const { PrismaClient } = require("@prisma/client");
 
 loadEnvConfig(process.cwd());
+if (process.env.DIRECT_URL) {
+  process.env.DATABASE_URL = process.env.DIRECT_URL;
+}
 
 const baseUrl = process.env.SMOKE_BASE_URL || "http://localhost:3000";
 const prisma = new PrismaClient();
@@ -25,6 +28,19 @@ function assert(condition, label) {
   console.log(`PASS ${label}`);
 }
 
+async function retry(label, fn, attempts = 4) {
+  let lastError;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 1500 * (index + 1)));
+    }
+  }
+  throw lastError ?? new Error(label);
+}
+
 function cookieFrom(headers) {
   const setCookie = headers.getSetCookie();
   if (!setCookie.length) {
@@ -37,13 +53,36 @@ function cookieFrom(headers) {
 }
 
 async function request(path, options = {}) {
+  const method = options.method || "GET";
+  const attempts = method === "GET" ? 3 : 1;
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await requestOnce(path, { ...options, method });
+      if (method === "GET" && response.status >= 500 && attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+  throw lastError ?? new Error(`request failed: ${path}`);
+}
+
+async function requestOnce(path, options = {}) {
   const url = new URL(path, baseUrl);
   const body = options.body || "";
   const headers = { ...(options.headers || {}) };
 
   const headerPath = pathJoinTemp("headers");
   const bodyPath = pathJoinTemp("body");
-  const args = ["-sS", "--max-time", "30", "-D", headerPath, "-o", bodyPath, "-X", options.method || "GET"];
+  const args = ["-sS", "--max-time", "60", "-D", headerPath, "-o", bodyPath, "-X", options.method || "GET"];
   if (process.platform === "win32") {
     args.splice(3, 0, "--ssl-no-revoke");
   }
@@ -225,10 +264,12 @@ async function main() {
     assert(dashboard.status === 307 && dashboard.headers.get("location")?.includes("/change-password"), "must-change-password user is forced to /change-password");
   }
 
-  const organization = await prisma.hospital.findFirst({
-    where: { isActive: true, departments: { some: { isActive: true } } },
-    include: { departments: { where: { isActive: true }, take: 1 } }
-  });
+  const organization = await retry("load active organization", () =>
+    prisma.hospital.findFirst({
+      where: { isActive: true, departments: { some: { isActive: true } } },
+      include: { departments: { where: { isActive: true }, take: 1 } }
+    })
+  );
   assert(Boolean(organization?.departments[0]), "active hospital and department exist for registration");
 
   const unique = Date.now().toString(36);

@@ -4,12 +4,14 @@ import {
   AlertTriangle,
   ArrowLeft,
   CalendarX,
+  CheckCircle2,
   Download,
   FileSpreadsheet,
   Loader2,
   Pencil,
   RefreshCw,
   Save,
+  Settings2,
   Table2,
   UsersRound,
   Wand2
@@ -17,6 +19,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
 import {
   MODE_LABELS,
@@ -42,7 +45,7 @@ import {
 
 type TabId = "requirements" | "unavailable" | "generate" | "schedule" | "adjust" | "export";
 type ScheduleView = "room" | "doctor";
-type BusyState = "load" | "save-requirements" | "save-unavailable" | "delete-result" | "generate" | "manual" | "export" | "";
+type BusyState = "load" | "save-requirements" | "save-unavailable" | "delete-result" | "generate" | "preview" | "manual" | "export" | "";
 
 type UnavailableDraft = Record<string, Record<string, { morning: boolean; afternoon: boolean }>>;
 type RequirementSlotDraft = { enabled: boolean; rooms: number; requiredDoctors: number; shiftTypeId?: string };
@@ -226,6 +229,7 @@ function currentTaskMode(value: unknown): TaskScheduleMode {
 export function TaskDetailClient({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<ApiTaskDetail | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("requirements");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [scheduleView, setScheduleView] = useState<ScheduleView>("room");
   const [busy, setBusy] = useState<BusyState>("load");
   const [error, setError] = useState("");
@@ -437,6 +441,23 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     }
   }
 
+  async function generatePreviewFromWizard() {
+    if (!task) return;
+    setBusy("preview");
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/preview/generate`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message ?? "生成预览失败");
+      window.location.assign(`/tasks/${task.id}/preview`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "生成预览失败");
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function clearScheduleResult() {
     if (!task) return;
     if (busy === "delete-result") return;
@@ -536,6 +557,138 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   const stats = currentTask.stats;
   const slotsForMode = getTimeSlotsForMode(currentTask.mode);
   const hasScheduleResult = currentTask.assignments.length > 0 || currentTask.conflicts.length > 0;
+
+  function renderWizard() {
+    const hasRequirements = stats.overall.expectedAssignments > 0;
+    const hasPreview = currentTask.assignments.length > 0 || currentTask.status === "PREVIEW" || currentTask.status === "GENERATED";
+    const hasFeedback = currentTask.unavailableTimes.length > 0;
+    const hasIdentitySnapshot = currentTask.doctors.some((doctor) => {
+      const tags = Array.isArray(doctor.tagSnapshotJson) ? doctor.tagSnapshotJson : [];
+      return tags.length > 0 || Boolean(doctor.staffProfileId);
+    });
+    const stepClass = (status: "done" | "warning" | "pending" | "optional") => {
+      if (status === "done") return "border-teal-200 bg-teal-50 text-hospital-green";
+      if (status === "warning") return "border-amber-200 bg-amber-50 text-amber-700";
+      if (status === "optional") return "border-blue-200 bg-blue-50 text-blue-700";
+      return "border-slate-200 bg-white text-slate-700";
+    };
+    const statusLabel = (status: "done" | "warning" | "pending" | "optional") => {
+      if (status === "done") return "已完成";
+      if (status === "warning") return "有异常";
+      if (status === "optional") return "可跳过";
+      return "未完成";
+    };
+    const wizardActionClass =
+      "focus-ring inline-flex items-center justify-center rounded-md bg-hospital-green px-3 py-2 text-sm font-medium text-white hover:bg-teal-800";
+    const steps: Array<{
+      number: number;
+      title: string;
+      desc: string;
+      status: "done" | "warning" | "pending" | "optional";
+      action: ReactNode;
+    }> = [
+      {
+        number: 1,
+        title: "导入人员",
+        desc: `${currentTask.doctors.length} 名人员已在本任务中。可继续维护固定人员池和轮转人员池。`,
+        status: currentTask.doctors.length ? "done" : "pending",
+        action: <Link href="/dashboard/roster" className={wizardActionClass}>去导入人员</Link>
+      },
+      {
+        number: 2,
+        title: "设置分类/身份",
+        desc: hasIdentitySnapshot ? "已读取人员身份和排班策略快照。" : "可设置是否参与自动排班、工作量系数、最多班次数等简化策略。",
+        status: hasIdentitySnapshot ? "done" : "optional",
+        action: <Link href="/dashboard/staff-tags" className={wizardActionClass}>去设置身份</Link>
+      },
+      {
+        number: 3,
+        title: "收集并分析反馈",
+        desc: hasFeedback ? `已录入 ${currentTask.unavailableTimes.length} 条不可排/反馈约束。` : "可查看谁已加入、谁未反馈，以及哪些反馈会进入算法。",
+        status: hasFeedback ? "done" : "optional",
+        action: <Link href="/dashboard/feedback-review" className={wizardActionClass}>去查看反馈</Link>
+      },
+      {
+        number: 4,
+        title: "自动生成预览",
+        desc: hasRequirements ? `当前规则需求 ${stats.overall.expectedAssignments} 个人员班次。` : "请先在高级设置中保存白班/夜班或自定义规则。",
+        status: hasPreview ? "done" : hasRequirements ? "pending" : "warning",
+        action: (
+          <button
+            type="button"
+            onClick={() => void generatePreviewFromWizard()}
+            disabled={busy === "preview" || !hasRequirements}
+            className={`${wizardActionClass} disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400`}
+          >
+            {busy === "preview" ? "生成中..." : "生成预览"}
+          </button>
+        )
+      },
+      {
+        number: 5,
+        title: "网页内修改排班",
+        desc: "进入日历预览，点击日期/班次即可调整人员，强制覆盖需要填写原因。",
+        status: hasPreview ? "done" : "pending",
+        action: <Link href={`/tasks/${currentTask.id}/preview`} className={wizardActionClass}>进入预览修改</Link>
+      },
+      {
+        number: 6,
+        title: "导出结果与公平报告",
+        desc: "导出 Excel、人员统计、冲突报告和公平性概览。",
+        status: currentTask.status === "GENERATED" ? "done" : "pending",
+        action: (
+          <button
+            type="button"
+            onClick={() => {
+              setShowAdvanced(true);
+              setActiveTab("export");
+            }}
+            className={wizardActionClass}
+          >
+            导出结果
+          </button>
+        )
+      }
+    ];
+
+    return (
+      <div className="rounded-xl border border-teal-100 bg-gradient-to-br from-white to-teal-50/40 p-5 shadow-table">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-medium text-hospital-green ring-1 ring-teal-100">
+              <CheckCircle2 size={14} />
+              默认主流程
+            </div>
+            <h3 className="mt-3 text-xl font-semibold text-slate-950">排班向导</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              从导入人员到生成预览、网页修改和导出报告，按这 6 步走即可完成一次排班。
+            </p>
+          </div>
+          <div className="text-sm text-slate-600">
+            当前模式：<span className="font-medium text-slate-900">{TASK_SCHEDULE_MODE_LABELS[taskScheduleMode]}</span>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          {steps.map((step) => (
+            <div key={step.number} className={`rounded-lg border p-4 ${stepClass(step.status)}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white text-sm font-semibold ring-1 ring-current/20">
+                    {step.number}
+                  </span>
+                  <div className="font-semibold">{step.title}</div>
+                </div>
+                <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] ring-1 ring-current/10">{statusLabel(step.status)}</span>
+              </div>
+              <p className="mt-3 min-h-10 text-sm leading-6 text-slate-600">{step.desc}</p>
+              <div className="mt-4">{step.action}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   function renderDoctorBadge(assignment: ApiAssignment) {
     return (
@@ -1239,30 +1392,51 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
       {notice ? <div className="rounded-md border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-hospital-green">{notice}</div> : null}
 
-      <nav className="flex gap-2 overflow-x-auto border-b border-slate-200">
-        {TABS.map(({ id, label, Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={
-              activeTab === id
-                ? "inline-flex shrink-0 items-center gap-2 border-b-2 border-hospital-green px-3 py-3 text-sm font-medium text-hospital-green"
-                : "inline-flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-3 text-sm font-medium text-slate-600 hover:text-slate-900"
-            }
-          >
-            <Icon size={16} />
-            {label}
-          </button>
-        ))}
-        <Link
-          href={`/tasks/${task.id}/preview`}
-          className="inline-flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-3 text-sm font-medium text-slate-600 hover:text-slate-900"
-        >
-          预览与编辑
-        </Link>
-      </nav>
+      {renderWizard()}
 
-      {activeTab === "requirements" ? renderRequirementControls() : null}
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-table">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-950">高级设置</h3>
+            <p className="mt-1 text-sm text-slate-500">需要细调规则、不可排班、手动调整或导出时再展开。</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((value) => !value)}
+            className="focus-ring inline-flex w-fit items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Settings2 size={16} />
+            {showAdvanced ? "收起高级设置" : "展开高级设置"}
+          </button>
+        </div>
+      </div>
+
+      {showAdvanced ? (
+        <>
+          <nav className="flex gap-2 overflow-x-auto border-b border-slate-200">
+            {TABS.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={
+                  activeTab === id
+                    ? "inline-flex shrink-0 items-center gap-2 border-b-2 border-hospital-green px-3 py-3 text-sm font-medium text-hospital-green"
+                    : "inline-flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-3 text-sm font-medium text-slate-600 hover:text-slate-900"
+                }
+              >
+                <Icon size={16} />
+                {label}
+              </button>
+            ))}
+            <Link
+              href={`/tasks/${task.id}/preview`}
+              className="inline-flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-3 text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              预览与编辑
+            </Link>
+          </nav>
+
+          {activeTab === "requirements" ? renderRequirementControls() : null}
 
       {activeTab === "unavailable" ? (
         <div className="space-y-4">
@@ -1424,7 +1598,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
         </div>
       ) : null}
 
-      {activeTab === "export" ? (
+          {activeTab === "export" ? (
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
           <div className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-table">
@@ -1468,6 +1642,8 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             </dl>
           </div>
         </div>
+          ) : null}
+        </>
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">

@@ -1,7 +1,7 @@
 "use client";
 
-import { Ban, Loader2, Plus, Save, ShieldCheck, UserCheck, UserX } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Ban, Copy, History, Link2, Loader2, Plus, RefreshCw, Save, ShieldCheck, UserCheck, UserX } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 
 type TaskOption = { id: string; weekStartDate: string; weekEndDate: string; unit?: { name: string } | null };
 type Pool = { id: string; name: string; poolType: string; active: boolean; startDate?: string | null; endDate?: string | null };
@@ -15,7 +15,27 @@ type RosterEntry = {
   includeInScheduling: boolean;
   userId?: string | null;
 };
-type JoinCode = { id: string; scheduleTaskId: string | null; staffPoolId: string | null; expiresAt: string; active: boolean; useCount: number; maxUses: number | null; createdAt: string };
+type JoinCode = {
+  id: string;
+  purpose: string;
+  hospitalName: string;
+  departmentName: string;
+  unitName: string;
+  scheduleTaskId: string | null;
+  scheduleTaskLabel: string | null;
+  staffPoolId: string | null;
+  staffPoolLabel: string | null;
+  codeValue: string | null;
+  codeUnavailableReason: string | null;
+  expiresAt: string;
+  active: boolean;
+  useCount: number;
+  maxUses: number | null;
+  createdByName: string;
+  createdAt: string;
+  revokedAt: string | null;
+  usageRecords: Array<{ id: string; inputName: string; inputPhone: string; matchStatus: string; reviewStatus: string; createdAt: string }>;
+};
 type Claim = { id: string; rosterEntryId: string | null; userId: string; inputName: string; inputPhone: string; matchStatus: string; reviewStatus: string; createdAt: string; rejectReason: string | null };
 type UserSummary = { id: string; username: string; displayName: string | null; phone: string | null };
 type RosterSummary = Pick<RosterEntry, "id" | "expectedName" | "expectedPhone" | "staffType" | "poolType" | "status" | "includeInScheduling">;
@@ -242,6 +262,7 @@ export function JoinCodesClient() {
   const [staffPoolId, setStaffPoolId] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyCodeId, setBusyCodeId] = useState("");
+  const [expandedCodeId, setExpandedCodeId] = useState("");
   const [message, setMessage] = useState("");
   async function load() {
     const [codesData, tasksData, poolsData] = await Promise.all([fetchJson("/api/join-codes"), fetchJson("/api/tasks?pageSize=50"), fetchJson("/api/staff-pools")]);
@@ -258,21 +279,50 @@ export function JoinCodesClient() {
       const data = await postJson("/api/join-codes", { scheduleTaskId, staffPoolId });
       setPlainCode(data.plainCode);
       await load();
-      setMessage("加入码已生成，明文只显示本次");
+      setMessage("访问码已生成，后续可在列表中再次复制。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "生成失败");
     } finally {
       setBusy(false);
     }
   }
+  async function copyToClipboard(id: string, text: string, action: "COPY_CODE" | "COPY_LINK") {
+    setBusyCodeId(id);
+    setMessage("");
+    try {
+      await writeClipboard(text);
+      await patchJson(`/api/join-codes/${id}`, { action });
+      setMessage(action === "COPY_CODE" ? "访问码已复制" : "加入链接已复制");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "复制失败");
+    } finally {
+      setBusyCodeId("");
+    }
+  }
+  async function regenerateCode(id: string) {
+    if (!window.confirm("确认重新生成这个访问码吗？旧访问码会立即失效，新访问码有效期重新计算 35 天。")) return;
+    setBusyCodeId(id);
+    setPlainCode("");
+    setMessage("");
+    try {
+      const data = await patchJson(`/api/join-codes/${id}`, { action: "REGENERATE" });
+      setPlainCode(data.plainCode ?? "");
+      await load();
+      setMessage("访问码已重新生成，可在列表中复制新码。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "重新生成失败");
+    } finally {
+      setBusyCodeId("");
+    }
+  }
   async function revokeCode(id: string) {
-    if (!window.confirm("确认作废这个加入码吗？作废后成员不能再用它申请加入。")) return;
+    if (!window.confirm("确认作废这个访问码吗？作废后成员不能再用它申请加入。")) return;
     setBusyCodeId(id);
     setMessage("");
     try {
       await deleteJson(`/api/join-codes/${id}`);
       await load();
-      setMessage("加入码已作废");
+      setMessage("访问码已作废");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "作废失败");
     } finally {
@@ -281,7 +331,7 @@ export function JoinCodesClient() {
   }
   return (
     <section className="space-y-5">
-      <Header title="访问码加入" desc="加入码用于成员申请加入，默认 35 天有效，明文只显示一次。" />
+      <Header title="访问码管理" desc="访问码用于成员申请加入，默认 35 天有效；新访问码可在后台再次查看和复制。" />
       <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-table">
         <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
           <select value={scheduleTaskId} onChange={(event) => setScheduleTaskId(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm">
@@ -294,46 +344,141 @@ export function JoinCodesClient() {
           </select>
           <button onClick={() => void createCode()} disabled={busy} className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300">
             {busy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-            生成加入码
+            生成访问码
           </button>
         </div>
-        {plainCode ? <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">本次加入码：<span className="font-mono text-base font-semibold">{plainCode}</span></div> : null}
+        {plainCode ? <div className="mt-4 rounded-md border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-hospital-green">新访问码：<span className="font-mono text-base font-semibold">{plainCode}</span><span className="ml-2 text-xs text-teal-700">已加密保存，后续仍可在列表复制。</span></div> : null}
         {message ? <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">{message}</div> : null}
       </div>
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
         <div className="table-scroll">
-          <table className="min-w-[760px] w-full text-left text-sm">
+          <table className="min-w-[1320px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-600">
-              <tr>{["创建时间", "有效期", "使用次数", "状态", "操作"].map((header) => <th key={header} className="border-b border-slate-200 px-3 py-3 font-medium">{header}</th>)}</tr>
+              <tr>{["用途", "所属医院", "所属科室", "所属病区", "绑定任务", "绑定人员池", "访问码", "有效期", "使用次数", "创建人/时间", "状态", "操作"].map((header) => <th key={header} className="border-b border-slate-200 px-3 py-3 font-medium">{header}</th>)}</tr>
             </thead>
             <tbody>
               {codes.length ? codes.map((code) => {
                 const valid = code.active && new Date(code.expiresAt) > new Date();
+                const joinLink =
+                  code.codeValue && typeof window !== "undefined"
+                    ? `${window.location.origin}/join?code=${encodeURIComponent(code.codeValue)}`
+                    : "";
+                const expanded = expandedCodeId === code.id;
                 return (
-                  <tr key={code.id}>
-                    <td className="border-b border-slate-100 px-3 py-3">{new Date(code.createdAt).toLocaleString("zh-CN")}</td>
-                    <td className="border-b border-slate-100 px-3 py-3">{new Date(code.expiresAt).toLocaleString("zh-CN")}</td>
-                    <td className="border-b border-slate-100 px-3 py-3">{code.useCount}/{code.maxUses ?? "不限"}</td>
-                    <td className="border-b border-slate-100 px-3 py-3">{valid ? "有效" : "失效"}</td>
-                    <td className="border-b border-slate-100 px-3 py-3">
-                      <button
-                        disabled={!valid || busyCodeId === code.id}
-                        onClick={() => void revokeCode(code.id)}
-                        className="focus-ring inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 disabled:opacity-40"
-                      >
-                        <Ban size={14} />
-                        {busyCodeId === code.id ? "作废中" : "作废"}
-                      </button>
-                    </td>
-                  </tr>
+                  <Fragment key={code.id}>
+                    <tr>
+                      <td className="border-b border-slate-100 px-3 py-3 font-medium text-slate-900">{code.purpose}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">{code.hospitalName}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">{code.departmentName}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">{code.unitName}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">{code.scheduleTaskLabel ?? "-"}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">{code.staffPoolLabel ?? "-"}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">
+                        {code.codeValue ? (
+                          <span className="font-mono text-sm font-semibold text-slate-900">{code.codeValue}</span>
+                        ) : (
+                          <span className="text-xs text-amber-700">{code.codeUnavailableReason}</span>
+                        )}
+                      </td>
+                      <td className="border-b border-slate-100 px-3 py-3">{new Date(code.expiresAt).toLocaleString("zh-CN")}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">{code.useCount}/{code.maxUses ?? "不限"}</td>
+                      <td className="border-b border-slate-100 px-3 py-3">
+                        <div>{code.createdByName}</div>
+                        <div className="text-xs text-slate-500">{new Date(code.createdAt).toLocaleString("zh-CN")}</div>
+                      </td>
+                      <td className="border-b border-slate-100 px-3 py-3">
+                        <div>{valid ? "有效" : "失效"}</div>
+                        {code.revokedAt ? <div className="text-xs text-red-600">作废：{new Date(code.revokedAt).toLocaleString("zh-CN")}</div> : null}
+                      </td>
+                      <td className="border-b border-slate-100 px-3 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            disabled={!valid || !code.codeValue || busyCodeId === code.id}
+                            onClick={() => code.codeValue ? void copyToClipboard(code.id, code.codeValue, "COPY_CODE") : undefined}
+                            className="focus-ring inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-700 disabled:opacity-40"
+                          >
+                            <Copy size={14} />
+                            复制码
+                          </button>
+                          <button
+                            disabled={!valid || !code.codeValue || busyCodeId === code.id}
+                            onClick={() => joinLink ? void copyToClipboard(code.id, joinLink, "COPY_LINK") : undefined}
+                            className="focus-ring inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-700 disabled:opacity-40"
+                          >
+                            <Link2 size={14} />
+                            复制链接
+                          </button>
+                          <button
+                            disabled={busyCodeId === code.id}
+                            onClick={() => void regenerateCode(code.id)}
+                            className="focus-ring inline-flex items-center gap-1 rounded-md border border-teal-200 px-2 py-1.5 text-xs text-hospital-green disabled:opacity-40"
+                          >
+                            <RefreshCw size={14} />
+                            重新生成
+                          </button>
+                          <button
+                            disabled={!valid || busyCodeId === code.id}
+                            onClick={() => void revokeCode(code.id)}
+                            className="focus-ring inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 disabled:opacity-40"
+                          >
+                            <Ban size={14} />
+                            {busyCodeId === code.id ? "处理中" : "作废"}
+                          </button>
+                          <button
+                            onClick={() => setExpandedCodeId(expanded ? "" : code.id)}
+                            className="focus-ring inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-700"
+                          >
+                            <History size={14} />
+                            使用记录
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    {expanded ? (
+                      <tr>
+                        <td colSpan={12} className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+                          {code.usageRecords.length ? (
+                            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                              {code.usageRecords.map((record) => (
+                                <div key={record.id} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                                  <div className="font-medium text-slate-900">{record.inputName} {record.inputPhone ? `(${record.inputPhone})` : ""}</div>
+                                  <div className="mt-1">匹配：{statusLabels[record.matchStatus] ?? record.matchStatus}；审核：{statusLabels[record.reviewStatus] ?? record.reviewStatus}</div>
+                                  <div className="mt-1 text-slate-500">{new Date(record.createdAt).toLocaleString("zh-CN")}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-slate-500">暂无使用记录</div>
+                          )}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
-              }) : <tr><td colSpan={5} className="px-3 py-8 text-center text-slate-500">暂无加入码</td></tr>}
+              }) : <tr><td colSpan={12} className="px-3 py-8 text-center text-slate-500">暂无访问码</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
     </section>
   );
+}
+
+async function writeClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const ok = document.execCommand("copy");
+  textarea.remove();
+  if (!ok) throw new Error("浏览器不支持自动复制，请手动选择复制");
 }
 
 export function JoinClaimsClient() {

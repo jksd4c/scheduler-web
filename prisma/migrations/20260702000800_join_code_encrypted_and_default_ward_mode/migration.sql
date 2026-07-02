@@ -1,0 +1,3 @@
+ALTER TABLE "JoinCode" ADD COLUMN IF NOT EXISTS "encryptedCode" TEXT;
+
+ALTER TABLE "ScheduleTask" ALTER COLUMN "scheduleMode" SET DEFAULT 'WARD_SHIFT';

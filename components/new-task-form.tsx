@@ -88,7 +88,7 @@ export function NewTaskForm() {
       },
       {
         id: "CUSTOM",
-        title: "自定义排班",
+        title: "高级自定义模式",
         fit: "适用于：特殊规则、临时任务、节假日专项、混合班次。",
         detail: "先使用班次矩阵创建需求，后续可在班次类型中继续扩展资格要求。",
         Icon: SlidersHorizontal

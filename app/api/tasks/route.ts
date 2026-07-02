@@ -80,9 +80,7 @@ export async function POST(request: Request) {
     const hasExplicitScheduleMode = body.scheduleMode != null && String(body.scheduleMode).trim() !== "";
     const scheduleMode = hasExplicitScheduleMode
       ? asTaskScheduleMode(String(body.scheduleMode))
-      : body.mode === SCHEDULE_MODE.HALF_DAY
-        ? TASK_SCHEDULE_MODE.MEDTECH_ROOM
-        : TASK_SCHEDULE_MODE.WARD_SHIFT;
+      : TASK_SCHEDULE_MODE.WARD_SHIFT;
     const mode =
       scheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM && body.mode === SCHEDULE_MODE.HALF_DAY
         ? SCHEDULE_MODE.HALF_DAY
@@ -286,12 +284,12 @@ export async function POST(request: Request) {
 async function ensureDefaultWardShiftTypes(unitId: string) {
   const defaults = [
     { name: "白班", category: "DAY", isNight: false, workloadWeight: 1, color: "#0f766e" },
-    { name: "夜班", category: "NIGHT", isNight: true, workloadWeight: 1, color: "#1d4ed8" }
+    { name: "夜班", category: "NIGHT", isNight: true, workloadWeight: 1.5, color: "#1d4ed8" }
   ];
   for (const item of defaults) {
     await prisma.shiftType.upsert({
       where: { unitId_name: { unitId, name: item.name } },
-      update: { active: true, category: item.category, isNight: item.isNight },
+      update: { active: true, category: item.category, isNight: item.isNight, workloadWeight: item.workloadWeight },
       create: {
         unitId,
         name: item.name,

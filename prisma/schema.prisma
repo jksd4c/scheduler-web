@@ -163,7 +163,7 @@ model ScheduleTask {
   weekStartDate    DateTime
   weekEndDate      DateTime
   mode             String
-  scheduleMode     String                  @default("MEDTECH_ROOM")
+  scheduleMode     String                  @default("WARD_SHIFT")
   status           String                  @default("DRAFT")
   doctors          ScheduleDoctor[]
   participants     ScheduleParticipant[]
@@ -254,6 +254,7 @@ model JoinCode {
   scheduleTaskId  String?
   staffPoolId     String?
   codeHash        String    @unique
+  encryptedCode   String?
   roleToGrant     String    @default("MEMBER")
   expiresAt       DateTime
   active          Boolean   @default(true)

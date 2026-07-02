@@ -58,7 +58,7 @@ export const MODE_LABELS: Record<ScheduleModeValue, string> = {
 export const TASK_SCHEDULE_MODE_LABELS: Record<TaskScheduleModeValue, string> = {
   WARD_SHIFT: "病房白班/夜班",
   MEDTECH_ROOM: "医技科室按房间",
-  CUSTOM: "自定义排班"
+  CUSTOM: "高级自定义"
 };
 
 export const STATUS_LABELS: Record<ScheduleStatusValue, string> = {
