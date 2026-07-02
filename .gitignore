@@ -5,13 +5,8 @@ dist
 .env
 .env.local
 .env*.local
+!.env.example
 .vercel
 prisma/dev.db
 prisma/dev.db-journal
 *.log
-
-.vercel
-.env
-.env.local
-.env.*.local
-!.env.example
