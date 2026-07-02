@@ -51,7 +51,7 @@ export function NewTaskForm() {
             返回任务列表
           </Link>
           <h2 className="mt-3 text-2xl font-semibold text-slate-950">新建排班任务</h2>
-          <p className="mt-1 text-sm text-slate-600">输入本次参与排班的规培医生和实习医生名单。</p>
+          <p className="mt-1 text-sm text-slate-600">输入本次参与排班的人员名单，可按 A/B 分组便于显示和统计。</p>
         </div>
       </div>
 
@@ -92,7 +92,7 @@ export function NewTaskForm() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">规培医生名单</span>
+              <span className="text-sm font-medium text-slate-700">人员 A 组名单</span>
               <textarea
                 value={residentNames}
                 onChange={(event) => setResidentNames(event.target.value)}
@@ -102,12 +102,12 @@ export function NewTaskForm() {
               />
             </label>
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">实习医生名单</span>
+              <span className="text-sm font-medium text-slate-700">人员 B 组名单</span>
               <textarea
                 value={internNames}
                 onChange={(event) => setInternNames(event.target.value)}
                 rows={12}
-                placeholder="每周变化的实习医生在这里手动输入"
+                placeholder="可填写轮转、临时加入或另一分组人员"
                 className="focus-ring mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
             </label>
@@ -134,11 +134,11 @@ export function NewTaskForm() {
             <h3 className="font-semibold text-slate-900">名单预览</h3>
             <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
               <div className="rounded-md bg-slate-50 p-3">
-                <dt className="text-xs text-slate-500">规培</dt>
+                <dt className="text-xs text-slate-500">A组</dt>
                 <dd className="mt-1 text-xl font-semibold text-slate-950">{parsed.residents.length}</dd>
               </div>
               <div className="rounded-md bg-slate-50 p-3">
-                <dt className="text-xs text-slate-500">实习</dt>
+                <dt className="text-xs text-slate-500">B组</dt>
                 <dd className="mt-1 text-xl font-semibold text-slate-950">{parsed.interns.length}</dd>
               </div>
               <div className="rounded-md bg-slate-50 p-3">
@@ -161,7 +161,7 @@ export function NewTaskForm() {
               </li>
               <li className="flex gap-2">
                 <CheckCircle2 size={16} className="mt-0.5 text-hospital-green" />
-                同名同时出现在两个名单时，按规培医生处理。
+                同名同时出现在两个名单时，按 A 组处理。
               </li>
             </ul>
           </div>

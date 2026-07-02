@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
 import { dateFromKey, getWeekDates } from "@/lib/date-utils";
 import { prisma } from "@/lib/prisma";
 import {
@@ -28,7 +29,7 @@ const VALID_SLOTS = new Set<string>([TIME_SLOT.FULL_DAY, TIME_SLOT.MORNING, TIME
 
 export async function PUT(request: Request, { params }: { params: { id: string } }) {
   try {
-    await requireScheduleTaskAccess(params.id);
+    const { user } = await requireScheduleTaskAccess(params.id);
     const body = await request.json();
     const records = Array.isArray(body.records) ? (body.records as IncomingRequirement[]) : [];
     const task = await prisma.scheduleTask.findUnique({
@@ -112,6 +113,17 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     });
 
     const updated = await getTaskDetail(task.id);
+    await writeAuditLog({
+      actorUserId: user.id,
+      hospitalId: task.hospitalId,
+      departmentId: task.departmentId,
+      unitId: task.unitId,
+      action: "UPDATE_SCHEDULE_REQUIREMENTS",
+      targetType: "ScheduleTask",
+      targetId: task.id,
+      afterJson: { requirementCount: data.length },
+      request
+    });
     return NextResponse.json({ task: updated });
   } catch (error) {
     if (error instanceof Error && "status" in error) {

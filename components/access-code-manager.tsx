@@ -33,7 +33,7 @@ export function AccessCodeManager() {
     const response = await fetch("/api/access-codes", { method: "POST" });
     const data = await response.json();
     if (!response.ok) {
-      setError(data.message ?? "生成访问密码失败");
+      setError(data.message ?? "生成查看密码失败");
       return;
     }
     setPlainCode(data.plainCode);
@@ -41,7 +41,7 @@ export function AccessCodeManager() {
   }
 
   async function revokeCode(id: string) {
-    if (!window.confirm("确认作废这个访客访问密码吗？")) return;
+    if (!window.confirm("确认作废这个排班查看密码吗？")) return;
     const response = await fetch(`/api/access-codes/${id}`, { method: "DELETE" });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
@@ -55,17 +55,17 @@ export function AccessCodeManager() {
     <section className="space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-table">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-slate-950">访客访问密码</h3>
+          <h3 className="text-lg font-semibold text-slate-950">排班查看密码</h3>
           <p className="mt-1 text-sm text-slate-600">密码默认有效 30 天，明文只在生成后显示一次。</p>
         </div>
         <button type="button" onClick={() => void createCode()} className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-3 py-2 text-sm font-medium text-white hover:bg-teal-800">
           <Plus size={16} />
-          生成访问密码
+          生成查看密码
         </button>
       </div>
       {plainCode ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          本次访问密码：<span className="font-mono text-base font-semibold">{plainCode}</span>
+          本次查看密码：<span className="font-mono text-base font-semibold">{plainCode}</span>
         </div>
       ) : null}
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -83,7 +83,7 @@ export function AccessCodeManager() {
             {codes.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
-                  暂无访问密码
+                  暂无查看密码
                 </td>
               </tr>
             ) : (

@@ -10,7 +10,7 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
     const departmentId = user.departmentId!;
     const code = await prisma.departmentAccessCode.findUnique({ where: { id: params.id } });
     if (!code || code.departmentId !== departmentId) {
-      return NextResponse.json({ message: "访问密码不存在" }, { status: 404 });
+      return NextResponse.json({ message: "查看密码不存在" }, { status: 404 });
     }
     await prisma.departmentAccessCode.update({
       where: { id: params.id },

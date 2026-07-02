@@ -9,14 +9,20 @@ export default async function AdminUsersPage() {
     return <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">无权限访问</div>;
   }
 
-  const [users, departments] = await Promise.all([
+  const [users, units] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: "asc" },
-      include: { department: true }
+      include: {
+        hospital: true,
+        department: true,
+        unit: true,
+        _count: { select: { createdTasks: true, feedback: true } }
+      }
     }),
-    prisma.department.findMany({
+    prisma.unit.findMany({
       where: { isActive: true },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "asc" },
+      include: { hospital: true, department: true }
     })
   ]);
 
@@ -25,7 +31,7 @@ export default async function AdminUsersPage() {
       <Link href="/admin" className="text-sm font-medium text-slate-600 hover:text-slate-950">
         返回最高管理员后台
       </Link>
-      <AdminUsersClient users={users} departments={departments} />
+      <AdminUsersClient users={users} units={units} />
     </div>
   );
 }

@@ -33,7 +33,7 @@ function safeError(error) {
 async function checkUser(label, username, password) {
   const user = await prisma.user.findUnique({
     where: { username },
-    include: { department: true }
+    include: { hospital: true, department: true, unit: true }
   });
 
   return {
@@ -43,7 +43,9 @@ async function checkUser(label, username, password) {
     role: user?.role || null,
     active: user?.isActive ?? null,
     mustChangePassword: user?.mustChangePassword ?? null,
+    hospitalName: user?.hospital?.name || null,
     departmentName: user?.department?.name || null,
+    unitName: user?.unit?.name || null,
     passwordMatchesEnvLocal: user ? verifySecret(password || "", user.passwordHash) : false
   };
 }

@@ -171,7 +171,7 @@ function createConflict(cell: RequiredScheduleCell, taskId: string, missingCount
     missingCount,
     description:
       description ??
-      `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 诊室${cell.roomNumber}缺少 ${missingCount} 人：可用医生不足或所有可用医生已被同一时段安排。`,
+      `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 单元${cell.roomNumber}缺少 ${missingCount} 人：可用人员不足或所有可用人员已被同一时段安排。`,
     severity: CONFLICT_SEVERITY.ERROR
   } satisfies InMemoryConflict;
 }
@@ -218,7 +218,7 @@ export async function generateScheduleForTask(taskId: string) {
         timeSlot: lockedTimeSlot,
         conflictType: "LOCKED_UNAVAILABLE",
         missingCount: null,
-        description: `${dateKey} ${getWeekdayLabel(lockedAssignment.weekday)} ${SLOT_LABELS[lockedTimeSlot]} 诊室${lockedAssignment.roomNumber}存在锁定排班，但该医生此时不可用。`,
+        description: `${dateKey} ${getWeekdayLabel(lockedAssignment.weekday)} ${SLOT_LABELS[lockedTimeSlot]} 单元${lockedAssignment.roomNumber}存在锁定排班，但该人员此时不可用。`,
         severity: CONFLICT_SEVERITY.ERROR
       });
     }
@@ -227,7 +227,7 @@ export async function generateScheduleForTask(taskId: string) {
   const taskMode = asScheduleMode(task.mode);
   const requiredCells = requirementsToCells(task.requirements);
   if (requiredCells.length === 0) {
-    throw new Error("请先设置至少一个开放诊室规则，再生成排班。");
+    throw new Error("请先设置至少一个开放单元规则，再生成排班。");
   }
 
   for (const cell of requiredCells) {
@@ -247,7 +247,7 @@ export async function generateScheduleForTask(taskId: string) {
         timeSlot: cell.timeSlot,
         conflictType: "OVERFILLED",
         missingCount: null,
-        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 诊室${cell.roomNumber}锁定人数超过需求。`,
+        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 单元${cell.roomNumber}锁定人数超过需求。`,
         severity: CONFLICT_SEVERITY.WARNING
       });
       continue;
@@ -279,8 +279,8 @@ export async function generateScheduleForTask(taskId: string) {
             task.id,
             missingCount,
             task.doctors.length === 0
-              ? `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 诊室${cell.roomNumber}缺少 ${missingCount} 人：本次任务没有医生。`
-              : `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 诊室${cell.roomNumber}缺少 ${missingCount} 人：可用医生不足，或所有可用医生已被同一时段安排。`
+              ? `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 单元${cell.roomNumber}缺少 ${missingCount} 人：本次任务没有人员。`
+              : `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 单元${cell.roomNumber}缺少 ${missingCount} 人：可用人员不足，或所有可用人员已被同一时段安排。`
           )
         );
         break;
@@ -358,7 +358,7 @@ export async function rebuildConflictsForTask(taskId: string) {
         timeSlot: cell.timeSlot,
         conflictType: "OVERFILLED",
         missingCount: null,
-        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 诊室${cell.roomNumber}超过需求人数，请人工检查。`,
+        description: `${cell.dateKey} ${getWeekdayLabel(cell.weekday)} ${SLOT_LABELS[cell.timeSlot]} 单元${cell.roomNumber}超过需求人数，请人工检查。`,
         severity: CONFLICT_SEVERITY.WARNING
       });
     }
@@ -382,7 +382,7 @@ export async function rebuildConflictsForTask(taskId: string) {
         timeSlot: assignmentTimeSlot,
         conflictType: "CLOSED_ROOM",
         missingCount: null,
-        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} 诊室${assignment.roomNumber}当天未开放。`,
+        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} 单元${assignment.roomNumber}当天未开放。`,
         severity: CONFLICT_SEVERITY.ERROR
       });
     }
@@ -396,7 +396,7 @@ export async function rebuildConflictsForTask(taskId: string) {
         timeSlot: assignmentTimeSlot,
         conflictType: "UNAVAILABLE_DOCTOR",
         missingCount: null,
-        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} ${SLOT_LABELS[assignmentTimeSlot]} 诊室${assignment.roomNumber}存在不可排班医生。`,
+        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} ${SLOT_LABELS[assignmentTimeSlot]} 单元${assignment.roomNumber}存在不可排班人员。`,
         severity: CONFLICT_SEVERITY.ERROR
       });
     }

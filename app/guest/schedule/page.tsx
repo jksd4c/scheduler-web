@@ -31,7 +31,7 @@ export default async function GuestSchedulePage() {
     <section className="space-y-5">
       <div>
         <h2 className="text-2xl font-semibold text-slate-950">{guest.department.name}排班查看</h2>
-        <p className="mt-1 text-sm text-slate-600">访客模式仅可查看已生成排班，不能编辑、删除、重新生成或导出。</p>
+        <p className="mt-1 text-sm text-slate-600">只读查看仅可查看已生成排班，不能编辑、删除、重新生成或导出。</p>
       </div>
 
       {tasks.length === 0 ? (
@@ -43,9 +43,9 @@ export default async function GuestSchedulePage() {
             date: toDateKey(assignment.date),
             weekday: getWeekdayLabel(assignment.weekday),
             timeSlot: SLOT_LABELS[asTimeSlot(assignment.timeSlot)],
-            room: `诊室${assignment.roomNumber}`,
+            room: `单元${assignment.roomNumber}`,
             doctor: assignment.doctor.name,
-            doctorType: assignment.doctor.doctorType === "INTERN" ? "实习" : "规培"
+            doctorType: assignment.doctor.doctorType === "INTERN" ? "B组" : "A组"
           }));
           return (
             <div key={task.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-5 shadow-table">
@@ -65,8 +65,8 @@ export default async function GuestSchedulePage() {
                       <th className="border-b border-slate-200 px-3 py-2 font-medium">日期</th>
                       <th className="border-b border-slate-200 px-3 py-2 font-medium">星期</th>
                       <th className="border-b border-slate-200 px-3 py-2 font-medium">时段</th>
-                      <th className="border-b border-slate-200 px-3 py-2 font-medium">诊室</th>
-                      <th className="border-b border-slate-200 px-3 py-2 font-medium">医生</th>
+                      <th className="border-b border-slate-200 px-3 py-2 font-medium">单元</th>
+                      <th className="border-b border-slate-200 px-3 py-2 font-medium">人员</th>
                       <th className="border-b border-slate-200 px-3 py-2 font-medium">类型</th>
                     </tr>
                   </thead>

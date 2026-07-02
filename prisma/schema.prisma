@@ -8,10 +8,29 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+model Hospital {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  isActive      Boolean        @default(true)
+  departments   Department[]
+  units         Unit[]
+  users         User[]
+  scheduleTasks ScheduleTask[]
+  feedback      Feedback[]
+  auditLogs     AuditLog[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([name])
+}
+
 model Department {
-  id               String                    @id @default(cuid())
-  name             String                    @unique
-  isActive         Boolean                   @default(true)
+  id               String                  @id @default(cuid())
+  hospitalId       String?
+  hospital         Hospital?               @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  name             String
+  isActive         Boolean                 @default(true)
+  units            Unit[]
   users            User[]
   scheduleTasks    ScheduleTask[]
   scheduleDoctors  ScheduleDoctor[]
@@ -21,26 +40,68 @@ model Department {
   conflicts        ScheduleConflict[]
   accessCodes      DepartmentAccessCode[]
   guestSessions    GuestSession[]
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
+  feedback         Feedback[]
+  auditLogs        AuditLog[]
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
+  @@unique([hospitalId, name])
+  @@index([hospitalId])
   @@index([name])
 }
 
-model User {
-  id                 String      @id @default(cuid())
-  username           String      @unique
-  passwordHash       String
-  role               String
-  departmentId       String?
-  department         Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  sessions           Session[]
-  mustChangePassword Boolean     @default(false)
-  isActive           Boolean     @default(true)
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+model Unit {
+  id              String         @id @default(cuid())
+  hospitalId      String?
+  hospital        Hospital?      @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  departmentId    String
+  department      Department     @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  name            String
+  isActive        Boolean        @default(true)
+  createdByUserId String?
+  createdByUser   User?          @relation("CreatedUnits", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  users           User[]
+  scheduleTasks   ScheduleTask[]
+  feedback        Feedback[]
+  auditLogs       AuditLog[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
+  @@unique([departmentId, name])
+  @@index([hospitalId])
   @@index([departmentId])
+  @@index([createdByUserId])
+}
+
+model User {
+  id                   String                @id @default(cuid())
+  username             String                @unique
+  passwordHash         String
+  role                 String
+  displayName          String?
+  phone                String?               @unique
+  email                String?               @unique
+  hospitalId           String?
+  hospital             Hospital?             @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  departmentId         String?
+  department           Department?           @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  unitId               String?
+  unit                 Unit?                 @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  createdUnits         Unit[]                @relation("CreatedUnits")
+  createdTasks         ScheduleTask[]
+  sessions             Session[]
+  feedback             Feedback[]
+  organizationRequests OrganizationRequest[]
+  auditLogs            AuditLog[]
+  mustChangePassword   Boolean               @default(false)
+  isActive             Boolean               @default(true)
+  lastLoginAt          DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
   @@index([role])
 }
 
@@ -83,37 +144,46 @@ model GuestSession {
 }
 
 model ScheduleTask {
-  id               String                    @id @default(cuid())
+  id               String                  @id @default(cuid())
+  hospitalId       String?
+  hospital         Hospital?               @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
   departmentId     String
-  department       Department                @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  department       Department              @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  unitId           String?
+  unit             Unit?                   @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  createdByUserId  String?
+  createdByUser    User?                   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   weekStartDate    DateTime
   weekEndDate      DateTime
   mode             String
-  status           String                    @default("DRAFT")
+  status           String                  @default("DRAFT")
   doctors          ScheduleDoctor[]
   unavailableTimes DoctorUnavailableTime[]
   requirements     ScheduleRequirement[]
   assignments      ScheduleAssignment[]
   conflicts        ScheduleConflict[]
-  createdAt        DateTime                  @default(now())
-  updatedAt        DateTime                  @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
+  @@index([hospitalId])
   @@index([departmentId])
+  @@index([unitId])
+  @@index([createdByUserId])
   @@index([weekStartDate])
   @@index([status])
 }
 
 model ScheduleDoctor {
-  id               String                    @id @default(cuid())
+  id               String                  @id @default(cuid())
   departmentId     String?
-  department       Department?               @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  department       Department?             @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   scheduleTaskId   String
-  scheduleTask     ScheduleTask              @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  scheduleTask     ScheduleTask            @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
   name             String
   doctorType       String
   unavailableTimes DoctorUnavailableTime[]
   assignments      ScheduleAssignment[]
-  createdAt        DateTime                  @default(now())
+  createdAt        DateTime                @default(now())
 
   @@unique([scheduleTaskId, name])
   @@index([departmentId])
@@ -202,4 +272,76 @@ model ScheduleConflict {
   @@index([departmentId])
   @@index([scheduleTaskId])
   @@index([date, timeSlot])
+}
+
+model Feedback {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hospitalId   String?
+  hospital     Hospital?   @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  unitId       String?
+  unit         Unit?       @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  type         String
+  title        String
+  content      String
+  pageUrl      String?
+  contact      String?
+  status       String      @default("NEW")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([status])
+  @@index([type])
+}
+
+model OrganizationRequest {
+  id              String   @id @default(cuid())
+  requesterUserId String?
+  requesterUser   User?    @relation(fields: [requesterUserId], references: [id], onDelete: SetNull)
+  hospitalName    String
+  departmentName  String
+  applicantName   String
+  contact         String
+  note            String?
+  status          String   @default("NEW")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([requesterUserId])
+  @@index([status])
+}
+
+model AuditLog {
+  id           String      @id @default(cuid())
+  actorUserId  String?
+  actorUser    User?       @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  hospitalId   String?
+  hospital     Hospital?   @relation(fields: [hospitalId], references: [id], onDelete: SetNull)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  unitId       String?
+  unit         Unit?       @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  action       String
+  targetType   String
+  targetId     String?
+  beforeJson   Json?
+  afterJson    Json?
+  reason       String?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime    @default(now())
+
+  @@index([actorUserId])
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([action])
+  @@index([createdAt])
 }

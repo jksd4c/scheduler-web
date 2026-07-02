@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { SCHEDULE_STATUS } from "@/lib/schedule-rules";
 import { getTaskDetail } from "@/lib/tasks";
 
 export const runtime = "nodejs";
 
-export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
   try {
-    const { task } = await requireScheduleTaskAccess(params.id);
+    const { user, task } = await requireScheduleTaskAccess(params.id);
     const fullTask = await prisma.scheduleTask.findUnique({
       where: { id: task.id },
       include: { requirements: true }
@@ -28,6 +29,16 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
     });
 
     const updated = await getTaskDetail(fullTask.id);
+    await writeAuditLog({
+      actorUserId: user.id,
+      hospitalId: fullTask.hospitalId,
+      departmentId: fullTask.departmentId,
+      unitId: fullTask.unitId,
+      action: "CLEAR_SCHEDULE_RESULT",
+      targetType: "ScheduleTask",
+      targetId: fullTask.id,
+      request
+    });
     return NextResponse.json({ task: updated });
   } catch (error) {
     return authErrorResponse(error);

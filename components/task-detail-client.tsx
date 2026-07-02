@@ -22,7 +22,6 @@ import {
   SLOT_LABELS,
   STATUS_LABELS,
   TIME_SLOT,
-  buildDefaultRequirements,
   clampRequiredDoctors,
   clampRoomCount,
   getTimeSlotsForMode,
@@ -122,24 +121,6 @@ function buildRequirementDraft(task: ApiTaskDetail): RequirementDraft {
     day[key].requiredDoctors = clampRequiredDoctors(requirement.requiredDoctors);
   }
   return draft;
-}
-
-function buildDefaultRequirementDraft(task: ApiTaskDetail): RequirementDraft {
-  return buildRequirementDraft({
-    ...task,
-    requirements: buildDefaultRequirements(task.mode, task.weekStartDate).map((item, index) => ({
-      id: `default-${index}`,
-      scheduleTaskId: task.id,
-      date: item.date.toISOString(),
-      weekday: item.weekday,
-      timeSlot: item.timeSlot,
-      enabled: item.enabled,
-      roomNumber: item.roomNumber,
-      requiredDoctors: item.requiredDoctors,
-      createdAt: "",
-      updatedAt: ""
-    }))
-  });
 }
 
 function expandRequirementDraft(task: ApiTaskDetail, draft: RequirementDraft) {
@@ -382,7 +363,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
 
   async function clearScheduleResult() {
     if (!task) return;
-    if (!window.confirm("确认清空当前排班结果吗？医生名单、不可排班时间和排班规则将保留。")) return;
+    if (!window.confirm("确认清空当前排班结果吗？人员名单、不可排班时间和排班规则将保留。")) return;
     setBusy("delete-result");
     setError("");
     setNotice("");
@@ -519,7 +500,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
               }}
               className="focus-ring w-full rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-800 disabled:text-slate-400"
             >
-              <option value="">{candidates.length ? "补排医生" : "无可用医生"}</option>
+              <option value="">{candidates.length ? "补排人员" : "无可用人员"}</option>
               {candidates.map((doctor) => (
                 <option key={doctor.id} value={doctor.id}>
                   {doctorLabel(doctor)}
@@ -574,12 +555,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold text-slate-950">排班规则设置</h3>
-            <p className="text-sm text-slate-600">诊室数量 0-20；每诊室人数 1-5。保存规则会清空旧排班结果。</p>
+            <p className="text-sm text-slate-600">单元数量 0-20；每单元人数 1-5。保存规则会清空旧排班结果。</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => setRequirementDraft(buildDefaultRequirementDraft(currentTask))} className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              使用默认心电图室规则
-            </button>
             <button
               onClick={() => {
                 const next: RequirementDraft = {};
@@ -612,7 +590,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">日期</th>
                   {currentTask.mode === "FULL_DAY" ? (
                     <>
-                      <th className="border-b border-slate-200 px-3 py-3 font-medium">是否开放 / 诊室数 / 每诊室人数</th>
+                      <th className="border-b border-slate-200 px-3 py-3 font-medium">是否开放 / 单元数 / 每单元人数</th>
                     </>
                   ) : (
                     <>
@@ -677,7 +655,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                     <tr>
                       {requirements.map((requirement) => (
                         <th key={requirement.roomNumber} className="border-b border-slate-200 px-3 py-3 font-medium">
-                          诊室{requirement.roomNumber}
+                          单元{requirement.roomNumber}
                           <span className="ml-1 text-xs font-normal text-slate-400">/{requirement.requiredDoctors}人</span>
                         </th>
                       ))}
@@ -748,7 +726,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           </span>
         </div>
         {currentTask.conflicts.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-600">暂无未排满诊室或不可用冲突。</div>
+          <div className="px-4 py-6 text-sm text-slate-600">暂无未排满单元或不可用冲突。</div>
         ) : (
           <div className="table-scroll">
             <table className="min-w-[860px] w-full border-collapse text-sm">
@@ -757,7 +735,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">日期</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">星期</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">时段</th>
-                  <th className="border-b border-slate-200 px-3 py-3 font-medium">诊室</th>
+                  <th className="border-b border-slate-200 px-3 py-3 font-medium">单元</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">缺少人数</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">类型</th>
                   <th className="border-b border-slate-200 px-3 py-3 font-medium">说明</th>
@@ -769,7 +747,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                     <td className="border-b border-slate-100 px-3 py-3">{toDateKey(conflict.date)}</td>
                     <td className="border-b border-slate-100 px-3 py-3">{getWeekdayLabel(conflict.weekday)}</td>
                     <td className="border-b border-slate-100 px-3 py-3">{SLOT_LABELS[conflict.timeSlot]}</td>
-                    <td className="border-b border-slate-100 px-3 py-3">诊室{conflict.roomNumber}</td>
+                    <td className="border-b border-slate-100 px-3 py-3">单元{conflict.roomNumber}</td>
                     <td className="border-b border-slate-100 px-3 py-3">{conflict.missingCount ?? 0}</td>
                     <td className="border-b border-slate-100 px-3 py-3">
                       <span className={`rounded border px-2 py-1 text-xs ${severityClass(conflict.severity)}`}>{conflict.conflictType}</span>
@@ -792,7 +770,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           <table className="min-w-[980px] w-full border-collapse text-sm">
             <thead className="bg-slate-50 text-left text-slate-600">
               <tr>
-                <th className="border-b border-slate-200 px-3 py-3 font-medium">医生</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">人员</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">总班次</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">上午</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">下午</th>
@@ -824,7 +802,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                           <span key={assignment.id} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-700">
                             {assignment.date}
                             {assignment.weekdayLabel}
-                            {assignment.timeSlotLabel} 诊室{assignment.roomNumber}
+                            {assignment.timeSlotLabel} 单元{assignment.roomNumber}
                           </span>
                         ))}
                       </div>
@@ -855,7 +833,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           <div className="mt-2 flex flex-wrap gap-2 text-sm">
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{MODE_LABELS[task.mode]}</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{STATUS_LABELS[task.status]}</span>
-            <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{task.doctors.length} 名医生</span>
+            <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{task.doctors.length} 名人员</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{task.requirements.length} 条规则</span>
           </div>
         </div>
@@ -908,7 +886,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
               <table className="min-w-[1120px] w-full border-collapse text-sm">
                 <thead className="bg-slate-50 text-left text-slate-600">
                   <tr>
-                    <th className="border-b border-slate-200 px-3 py-3 font-medium">医生</th>
+                    <th className="border-b border-slate-200 px-3 py-3 font-medium">人员</th>
                     {weekDays.map((day) => (
                       <th key={day.dateKey} className="border-b border-slate-200 px-3 py-3 font-medium">
                         <div>{day.label}</div>
@@ -1014,10 +992,10 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
               ) : null}
               <div className="inline-flex rounded-md border border-slate-300 bg-white p-1">
                 <button onClick={() => setScheduleView("room")} className={scheduleView === "room" ? "rounded px-3 py-1.5 text-sm font-medium text-hospital-green" : "rounded px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"}>
-                  诊室视图
+                  班次单元视图
                 </button>
                 <button onClick={() => setScheduleView("doctor")} className={scheduleView === "doctor" ? "rounded px-3 py-1.5 text-sm font-medium text-hospital-green" : "rounded px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"}>
-                  医生视图
+                  人员视图
                 </button>
               </div>
             </div>
@@ -1032,7 +1010,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
         <div className="space-y-4">
           <div>
             <h3 className="text-lg font-semibold text-slate-950">手动调整</h3>
-            <p className="text-sm text-slate-600">下拉框只列出该时间段可用且未重复占用的医生。</p>
+            <p className="text-sm text-slate-600">下拉框只列出该时间段可用且未重复占用的人员。</p>
           </div>
           {renderRoomTable(true)}
           {renderConflictReport()}
@@ -1049,7 +1027,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-slate-950">导出 Excel</h3>
-                  <p className="mt-1 text-sm text-slate-600">文件包含动态诊室排班表、医生个人统计和冲突报告。</p>
+                  <p className="mt-1 text-sm text-slate-600">文件包含动态单元排班表、人员个人统计和冲突报告。</p>
                   <a href={`/api/tasks/${task.id}/export`} className="focus-ring mt-4 inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800">
                     <FileSpreadsheet size={16} />
                     导出 Excel
@@ -1062,7 +1040,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             <h4 className="font-semibold text-slate-900">导出概览</h4>
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex items-center justify-between">
-                <dt className="text-slate-500">医生人数</dt>
+                <dt className="text-slate-500">人员人数</dt>
                 <dd className="font-medium">{stats.overall.doctorCount}</dd>
               </div>
               <div className="flex items-center justify-between">
@@ -1090,7 +1068,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-table">
           <div className="text-sm text-slate-500">当前规则需求</div>
-          <div className="mt-2 text-lg font-semibold text-slate-950">{stats.overall.expectedAssignments} 个医生班次</div>
+          <div className="mt-2 text-lg font-semibold text-slate-950">{stats.overall.expectedAssignments} 个人员班次</div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-table">
           <div className="flex items-center gap-2 text-sm text-slate-500">

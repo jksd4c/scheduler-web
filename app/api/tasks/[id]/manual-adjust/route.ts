@@ -41,7 +41,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
     const doctor = task.doctors.find((item) => item.id === body.doctorId);
     if (!doctor) {
-      return NextResponse.json({ message: "医生不在本次排班任务名单中" }, { status: 400 });
+      return NextResponse.json({ message: "人员不在本次排班任务名单中" }, { status: 400 });
     }
 
     const existingAssignment = body.assignmentId ? task.assignments.find((assignment) => assignment.id === body.assignmentId) : null;
@@ -79,11 +79,11 @@ export async function POST(request: Request, { params }: { params: { id: string 
         item.requiredDoctors > 0
     );
     if (!requirement) {
-      return NextResponse.json({ message: "该日期、时段或诊室未开放" }, { status: 400 });
+      return NextResponse.json({ message: "该日期、时段或单元未开放" }, { status: 400 });
     }
 
     if (isDoctorUnavailable(task.unavailableTimes, doctor.id, dateKey, timeSlot)) {
-      return NextResponse.json({ message: "所选医生在该时间段不可用，不能保存" }, { status: 409 });
+      return NextResponse.json({ message: "所选人员在该时间段不可用，不能保存" }, { status: 409 });
     }
 
     const duplicate = task.assignments.find(
@@ -91,13 +91,13 @@ export async function POST(request: Request, { params }: { params: { id: string 
     );
 
     if (duplicate) {
-      return NextResponse.json({ message: "同一医生同一时间不能重复排到多个诊室" }, { status: 409 });
+      return NextResponse.json({ message: "同一人员同一时间不能重复排到多个单元" }, { status: 409 });
     }
 
     if (!existingAssignment) {
       const currentCellCount = task.assignments.filter((assignment) => sameSlot(assignment, dateKey, timeSlot) && assignment.roomNumber === roomNumber).length;
       if (currentCellCount >= requirement.requiredDoctors) {
-        return NextResponse.json({ message: "该诊室当前时段已排满" }, { status: 400 });
+        return NextResponse.json({ message: "该单元当前时段已排满" }, { status: 400 });
       }
     }
 

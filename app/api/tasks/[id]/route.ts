@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { getTaskDetail } from "@/lib/tasks";
 
@@ -18,9 +19,9 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   }
 }
 
-export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
   try {
-    const { task } = await requireScheduleTaskAccess(params.id);
+    const { user, task } = await requireScheduleTaskAccess(params.id);
 
     await prisma.$transaction([
       prisma.scheduleAssignment.deleteMany({ where: { scheduleTaskId: task.id } }),
@@ -30,6 +31,17 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
       prisma.scheduleDoctor.deleteMany({ where: { scheduleTaskId: task.id } }),
       prisma.scheduleTask.delete({ where: { id: task.id } })
     ]);
+
+    await writeAuditLog({
+      actorUserId: user.id,
+      hospitalId: task.hospitalId,
+      departmentId: task.departmentId,
+      unitId: task.unitId,
+      action: "DELETE_SCHEDULE_TASK",
+      targetType: "ScheduleTask",
+      targetId: task.id,
+      request
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

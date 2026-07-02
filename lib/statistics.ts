@@ -202,16 +202,16 @@ export function calculateScheduleStats(input: {
 
   const warnings: string[] = [];
   if (unfilledAssignments > 0) {
-    warnings.push(`存在未排满班次，缺少 ${unfilledAssignments} 个医生班次。`);
+    warnings.push(`存在未排满班次，缺少 ${unfilledAssignments} 个人员班次。`);
   }
   if (hasUnavailableConflicts) {
-    warnings.push("存在医生被安排到不可排班时间，请检查手动调整结果。");
+    warnings.push("存在人员被安排到不可排班时间，请检查手动调整结果。");
   }
   if (hasConsecutiveWork) {
-    warnings.push("存在连续上班医生，建议人工复核。");
+    warnings.push("存在连续上班人员，建议人工复核。");
   }
   if (hasObviousImbalance) {
-    warnings.push(`医生工作量不均衡，最高 ${maxAssignments} 次，最低 ${minAssignments} 次。`);
+    warnings.push(`人员工作量不均衡，最高 ${maxAssignments} 次，最低 ${minAssignments} 次。`);
   }
 
   return {

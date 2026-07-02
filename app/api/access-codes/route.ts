@@ -40,6 +40,6 @@ export async function POST() {
     if (error instanceof Error && "status" in error) {
       return authErrorResponse(error);
     }
-    return NextResponse.json({ message: "生成访问密码失败" }, { status: 500 });
+    return NextResponse.json({ message: "生成查看密码失败" }, { status: 500 });
   }
 }

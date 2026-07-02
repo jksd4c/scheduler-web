@@ -1,4 +1,4 @@
-import { addDays, getWeekDates, toDateKey, type WeekdayNumber } from "@/lib/date-utils";
+import { toDateKey, type WeekdayNumber } from "@/lib/date-utils";
 
 export type ScheduleModeValue = "FULL_DAY" | "HALF_DAY";
 export type ScheduleStatusValue = "DRAFT" | "RULES_SET" | "GENERATED" | "PUBLISHED" | "LOCKED";
@@ -55,11 +55,6 @@ export const STATUS_LABELS: Record<ScheduleStatusValue, string> = {
   LOCKED: "\u5df2\u9501\u5b9a"
 };
 
-export type DayRule = {
-  rooms: number;
-  doctorsPerRoom: number;
-};
-
 export type ScheduleRequirementLike = {
   id?: string;
   scheduleTaskId?: string;
@@ -82,16 +77,6 @@ export type RequiredScheduleCell = {
 
 export const MAX_ROOMS_PER_SLOT = 20;
 export const MAX_DOCTORS_PER_ROOM = 5;
-
-export const DEFAULT_ECG_DAY_RULES: Record<WeekdayNumber, DayRule> = {
-  1: { rooms: 5, doctorsPerRoom: 2 },
-  2: { rooms: 5, doctorsPerRoom: 2 },
-  3: { rooms: 6, doctorsPerRoom: 1 },
-  4: { rooms: 6, doctorsPerRoom: 1 },
-  5: { rooms: 6, doctorsPerRoom: 1 },
-  6: { rooms: 3, doctorsPerRoom: 1 },
-  7: { rooms: 3, doctorsPerRoom: 1 }
-};
 
 export function asScheduleMode(value: string): ScheduleModeValue {
   return value === SCHEDULE_MODE.HALF_DAY ? SCHEDULE_MODE.HALF_DAY : SCHEDULE_MODE.FULL_DAY;
@@ -142,7 +127,9 @@ export function getTimeSlotsForMode(mode: ScheduleModeValue): TimeSlotValue[] {
 }
 
 export function buildDefaultRequirements(mode: ScheduleModeValue, weekStartDate: Date | string, scheduleTaskId?: string) {
-  const requirements: Array<{
+  const _unused = { mode, weekStartDate, scheduleTaskId };
+  void _unused;
+  return [] as Array<{
     scheduleTaskId?: string;
     date: Date;
     weekday: WeekdayNumber;
@@ -150,26 +137,7 @@ export function buildDefaultRequirements(mode: ScheduleModeValue, weekStartDate:
     enabled: boolean;
     roomNumber: number;
     requiredDoctors: number;
-  }> = [];
-
-  for (const day of getWeekDates(weekStartDate)) {
-    const rule = DEFAULT_ECG_DAY_RULES[day.weekday];
-    for (const timeSlot of getTimeSlotsForMode(mode)) {
-      for (let roomNumber = 1; roomNumber <= rule.rooms; roomNumber += 1) {
-        requirements.push({
-          scheduleTaskId,
-          date: addDays(toDateKey(weekStartDate), day.weekday - 1),
-          weekday: day.weekday,
-          timeSlot,
-          enabled: true,
-          roomNumber,
-          requiredDoctors: rule.doctorsPerRoom
-        });
-      }
-    }
-  }
-
-  return requirements;
+  }>;
 }
 
 export function requirementsToCells(requirements: ScheduleRequirementLike[]): RequiredScheduleCell[] {

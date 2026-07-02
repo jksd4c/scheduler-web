@@ -14,8 +14,6 @@ function requiredEnv(name) {
   return value;
 }
 
-// The deployed login code currently verifies the app's scrypt hash format.
-// Using bcrypt here would require a code deploy before the new hashes could log in.
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("base64url");
   const hash = crypto.scryptSync(password, salt, 64).toString("base64url");
@@ -28,21 +26,31 @@ function safeUserSummary(user) {
     role: user.role,
     active: user.isActive,
     mustChangePassword: user.mustChangePassword,
-    departmentName: user.department?.name || null
+    hospitalName: user.hospital?.name || null,
+    departmentName: user.department?.name || null,
+    unitName: user.unit?.name || null
   };
 }
 
 async function main() {
+  const hospitalName = process.env.INITIAL_HOSPITAL_NAME?.trim() || "默认医院";
+  const departmentName = requiredEnv("INITIAL_DEPARTMENT_NAME");
+  const unitName = process.env.INITIAL_UNIT_NAME?.trim() || "默认病区";
   const superAdminUsername = requiredEnv("INITIAL_SUPER_ADMIN_USERNAME");
   const superAdminPassword = requiredEnv("INITIAL_SUPER_ADMIN_PASSWORD");
   const departmentAdminUsername = requiredEnv("INITIAL_DEPARTMENT_ADMIN_USERNAME");
   const departmentAdminPassword = requiredEnv("INITIAL_DEPARTMENT_ADMIN_PASSWORD");
-  const departmentName = requiredEnv("INITIAL_DEPARTMENT_NAME");
+
+  const hospital = await prisma.hospital.upsert({
+    where: { name: hospitalName },
+    update: { isActive: true },
+    create: { name: hospitalName, isActive: true }
+  });
 
   const department = await prisma.department.upsert({
-    where: { name: departmentName },
-    update: { isActive: true },
-    create: { name: departmentName, isActive: true }
+    where: { hospitalId_name: { hospitalId: hospital.id, name: departmentName } },
+    update: { hospitalId: hospital.id, isActive: true },
+    create: { hospitalId: hospital.id, name: departmentName, isActive: true }
   });
 
   const superAdmin = await prisma.user.upsert({
@@ -50,45 +58,67 @@ async function main() {
     update: {
       passwordHash: hashPassword(superAdminPassword),
       role: "SUPER_ADMIN",
+      hospitalId: null,
       departmentId: null,
+      unitId: null,
       isActive: true,
       mustChangePassword: false
     },
     create: {
       username: superAdminUsername,
+      displayName: superAdminUsername,
       passwordHash: hashPassword(superAdminPassword),
       role: "SUPER_ADMIN",
+      hospitalId: null,
       departmentId: null,
+      unitId: null,
       isActive: true,
       mustChangePassword: false
     },
-    include: { department: true }
+    include: { hospital: true, department: true, unit: true }
   });
 
-  const departmentAdmin = await prisma.user.upsert({
+  const unit = await prisma.unit.upsert({
+    where: { departmentId_name: { departmentId: department.id, name: unitName } },
+    update: { hospitalId: hospital.id, isActive: true },
+    create: {
+      hospitalId: hospital.id,
+      departmentId: department.id,
+      name: unitName,
+      isActive: true,
+      createdByUserId: superAdmin.id
+    }
+  });
+
+  const schedulerAdmin = await prisma.user.upsert({
     where: { username: departmentAdminUsername },
     update: {
       passwordHash: hashPassword(departmentAdminPassword),
-      role: "DEPARTMENT_ADMIN",
+      role: "SCHEDULER_ADMIN",
+      hospitalId: hospital.id,
       departmentId: department.id,
+      unitId: unit.id,
       isActive: true,
       mustChangePassword: true
     },
     create: {
       username: departmentAdminUsername,
+      displayName: departmentAdminUsername,
       passwordHash: hashPassword(departmentAdminPassword),
-      role: "DEPARTMENT_ADMIN",
+      role: "SCHEDULER_ADMIN",
+      hospitalId: hospital.id,
       departmentId: department.id,
+      unitId: unit.id,
       isActive: true,
       mustChangePassword: true
     },
-    include: { department: true }
+    include: { hospital: true, department: true, unit: true }
   });
 
   console.log("已重置 jks");
   console.table([safeUserSummary(superAdmin)]);
   console.log("已重置 xdt");
-  console.table([safeUserSummary(departmentAdmin)]);
+  console.table([safeUserSummary(schedulerAdmin)]);
 }
 
 main()

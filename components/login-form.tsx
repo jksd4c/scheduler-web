@@ -1,8 +1,10 @@
 "use client";
 
 import { LogIn } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { PRODUCT_TAGLINE, PRODUCT_VERSION_LABEL } from "@/lib/product";
 
 export function LoginForm() {
   const router = useRouter();
@@ -37,8 +39,9 @@ export function LoginForm() {
   return (
     <form onSubmit={submit} className="mx-auto max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-table">
       <div>
+        <p className="text-sm font-medium text-hospital-green">{PRODUCT_VERSION_LABEL}</p>
         <h2 className="text-xl font-semibold text-slate-950">账号登录</h2>
-        <p className="mt-1 text-sm text-slate-600">请输入管理员账号和密码。</p>
+        <p className="mt-1 text-sm text-slate-600">{PRODUCT_TAGLINE}</p>
       </div>
       <label className="block">
         <span className="text-sm font-medium text-slate-700">用户名</span>
@@ -68,6 +71,12 @@ export function LoginForm() {
         <LogIn size={16} />
         {loading ? "登录中" : "登录"}
       </button>
+      <p className="text-center text-sm text-slate-500">
+        没有账号？
+        <Link href="/register" className="font-medium text-hospital-green hover:text-teal-800">
+          注册测试服账号
+        </Link>
+      </p>
     </form>
   );
 }

@@ -37,7 +37,7 @@ export function TaskList() {
   async function deleteTask(task: ApiTaskListItem) {
     if (
       !window.confirm(
-        "确认删除这个排班任务吗？该任务的医生名单、不可排班时间、排班规则、排班结果和冲突记录都会被删除，且无法恢复。"
+        "确认删除这个排班任务吗？该任务的人员名单、不可排班时间、排班规则、排班结果和冲突记录都会被删除，且无法恢复。"
       )
     ) {
       return;
@@ -67,7 +67,7 @@ export function TaskList() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-semibold text-slate-950">排班任务列表</h2>
-          <p className="mt-1 text-sm text-slate-600">每个任务都是一次独立的本周排班快照。</p>
+          <p className="mt-1 text-sm text-slate-600">每个任务都是一次独立的排班快照。</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -96,10 +96,11 @@ export function TaskList() {
           <table className="min-w-[860px] w-full border-collapse text-left text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
-                <th className="border-b border-slate-200 px-4 py-3 font-medium">排班周</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">排班周期</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">病区/小组</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">模式</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">状态</th>
-                <th className="border-b border-slate-200 px-4 py-3 font-medium">医生数</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">人员数</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">已排班</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">冲突</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">创建时间</th>
@@ -109,13 +110,13 @@ export function TaskList() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-slate-500" colSpan={8}>
+                  <td className="px-4 py-8 text-center text-slate-500" colSpan={9}>
                     正在加载任务...
                   </td>
                 </tr>
               ) : tasks.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-slate-500" colSpan={8}>
+                  <td className="px-4 py-8 text-center text-slate-500" colSpan={9}>
                     暂无排班任务
                   </td>
                 </tr>
@@ -128,6 +129,7 @@ export function TaskList() {
                         {toDateKey(task.weekStartDate)} 至 {toDateKey(task.weekEndDate)}
                       </div>
                     </td>
+                    <td className="border-b border-slate-100 px-4 py-3 text-slate-600">{task.unit?.name ?? task.department?.name ?? "-"}</td>
                     <td className="border-b border-slate-100 px-4 py-3">{MODE_LABELS[task.mode]}</td>
                     <td className="border-b border-slate-100 px-4 py-3">
                       <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">

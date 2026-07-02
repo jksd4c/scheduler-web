@@ -131,6 +131,11 @@ export type ApiTaskListItem = {
     name: string;
     isActive?: boolean;
   } | null;
+  unit?: {
+    id: string;
+    name: string;
+    isActive?: boolean;
+  } | null;
   weekStartDate: string;
   weekEndDate: string;
   mode: ScheduleMode;
@@ -145,6 +150,6 @@ export type ApiTaskListItem = {
 };
 
 export const DOCTOR_TYPE_LABEL: Record<DoctorType, string> = {
-  RESIDENT: "规培",
-  INTERN: "实习"
+  RESIDENT: "A组",
+  INTERN: "B组"
 };

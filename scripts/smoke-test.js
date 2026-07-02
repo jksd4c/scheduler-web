@@ -3,10 +3,12 @@ const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { PrismaClient } = require("@prisma/client");
 
 loadEnvConfig(process.cwd());
 
 const baseUrl = process.env.SMOKE_BASE_URL || "http://localhost:3000";
+const prisma = new PrismaClient();
 
 function requiredEnv(name) {
   const value = process.env[name];
@@ -80,7 +82,7 @@ async function request(path, options = {}) {
 }
 
 function pathJoinTemp(kind) {
-  return path.join(os.tmpdir(), `ecg-smoke-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.${kind}`);
+  return path.join(os.tmpdir(), `fair-schedule-smoke-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.${kind}`);
 }
 
 function buildResponse(rawHeaders, text) {
@@ -160,6 +162,12 @@ async function main() {
   const loginPage = await request("/login");
   assert(loginPage.status === 200, "/login is accessible");
 
+  const registerPage = await request("/register");
+  assert(registerPage.status === 200, "/register is accessible");
+
+  const feedbackUnauth = await request("/feedback");
+  assert(feedbackUnauth.status === 307 && feedbackUnauth.headers.get("location")?.includes("/login"), "unauthenticated /feedback is rejected");
+
   const guestPage = await request("/guest");
   assert(guestPage.status === 200, "/guest is accessible");
 
@@ -181,20 +189,61 @@ async function main() {
   const adminPage = await request("/admin", { headers: { Cookie: superAdminLogin.cookie } });
   assert(adminPage.status === 200, "SUPER_ADMIN can access /admin");
 
+  const adminFeedback = await request("/admin/feedback", { headers: { Cookie: superAdminLogin.cookie } });
+  assert(adminFeedback.status === 200, "SUPER_ADMIN can access /admin/feedback");
+
   const departmentAdminLogin = await login(departmentAdminUsername, departmentAdminPassword);
-  assert(departmentAdminLogin.response.status === 200, "DEPARTMENT_ADMIN login succeeds");
+  assert(departmentAdminLogin.response.status === 200, "SCHEDULER_ADMIN login succeeds");
   assert(
     departmentAdminLogin.data.redirectTo === "/dashboard" || departmentAdminLogin.data.redirectTo === "/change-password",
-    "DEPARTMENT_ADMIN reaches /dashboard or is required to change password"
+    "SCHEDULER_ADMIN reaches /dashboard or is required to change password"
   );
 
   if (departmentAdminLogin.data.redirectTo === "/dashboard") {
     const dashboard = await request("/dashboard", { headers: { Cookie: departmentAdminLogin.cookie } });
-    assert(dashboard.status === 200, "DEPARTMENT_ADMIN can access /dashboard");
+    assert(dashboard.status === 200, "SCHEDULER_ADMIN can access /dashboard");
   } else {
     const dashboard = await request("/dashboard", { headers: { Cookie: departmentAdminLogin.cookie } });
     assert(dashboard.status === 307 && dashboard.headers.get("location")?.includes("/change-password"), "must-change-password user is forced to /change-password");
   }
+
+  const organization = await prisma.hospital.findFirst({
+    where: { isActive: true, departments: { some: { isActive: true } } },
+    include: { departments: { where: { isActive: true }, take: 1 } }
+  });
+  assert(Boolean(organization?.departments[0]), "active hospital and department exist for registration");
+
+  const unique = Date.now().toString(36);
+  const registerPassword = `Smoke-${unique}-Pass1`;
+  const registerResult = await jsonRequest("/api/register", {
+    method: "POST",
+    body: JSON.stringify({
+      username: `smoke_${unique}`,
+      password: registerPassword,
+      displayName: `Smoke ${unique}`,
+      hospitalId: organization.id,
+      departmentId: organization.departments[0].id,
+      unitName: `冒烟测试病区-${unique}`
+    })
+  });
+  assert(registerResult.response.status === 201 && registerResult.data.redirectTo === "/dashboard", "public registration creates scheduler admin");
+
+  const registeredDashboard = await request("/dashboard", { headers: { Cookie: registerResult.cookie } });
+  assert(registeredDashboard.status === 200, "registered scheduler admin can access /dashboard");
+
+  const registeredAdminApi = await request("/api/admin/hospitals", { headers: { Cookie: registerResult.cookie } });
+  assert(registeredAdminApi.status === 403, "registered scheduler admin cannot call SUPER_ADMIN API");
+
+  const feedbackResult = await jsonRequest("/api/feedback", {
+    method: "POST",
+    headers: { Cookie: registerResult.cookie },
+    body: JSON.stringify({
+      type: "BUG",
+      title: `Smoke feedback ${unique}`,
+      content: "Smoke test feedback content."
+    })
+  });
+  assert(feedbackResult.response.status === 201, "registered user can submit feedback");
 
   const editAttempt = await jsonRequest("/api/tasks/smoke-test-task/manual-adjust", {
     method: "POST",
@@ -215,4 +264,6 @@ main().catch((error) => {
   const details = [error.name, error.code, error.message].filter(Boolean).join(" ");
   console.error(`SMOKE_TEST_FAILED ${details || "unknown error"}`);
   process.exit(1);
+}).finally(async () => {
+  await prisma.$disconnect();
 });
