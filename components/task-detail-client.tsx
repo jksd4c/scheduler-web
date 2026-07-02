@@ -1231,6 +1231,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
         <Link href={`/tasks/${task.id}/precheck`} className="focus-ring inline-flex w-fit items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
           排班前检查
         </Link>
+        <Link href={`/tasks/${task.id}/preview`} className="focus-ring inline-flex w-fit items-center gap-2 rounded-md bg-hospital-green px-3 py-2 text-sm font-medium text-white hover:bg-teal-800">
+          预览与编辑
+        </Link>
       </div>
 
       {error ? <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
@@ -1251,6 +1254,12 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             {label}
           </button>
         ))}
+        <Link
+          href={`/tasks/${task.id}/preview`}
+          className="inline-flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-3 text-sm font-medium text-slate-600 hover:text-slate-900"
+        >
+          预览与编辑
+        </Link>
       </nav>
 
       {activeTab === "requirements" ? renderRequirementControls() : null}

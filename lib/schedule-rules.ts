@@ -2,7 +2,7 @@ import { toDateKey, type WeekdayNumber } from "@/lib/date-utils";
 
 export type ScheduleModeValue = "FULL_DAY" | "HALF_DAY";
 export type TaskScheduleModeValue = "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
-export type ScheduleStatusValue = "DRAFT" | "RULES_SET" | "GENERATED" | "PUBLISHED" | "LOCKED";
+export type ScheduleStatusValue = "DRAFT" | "RULES_SET" | "PREVIEW" | "GENERATED" | "PUBLISHED" | "LOCKED";
 export type DoctorTypeValue = "RESIDENT" | "INTERN";
 export type TimeSlotValue = "FULL_DAY" | "MORNING" | "AFTERNOON";
 export type ConflictSeverityValue = "INFO" | "WARNING" | "ERROR";
@@ -21,6 +21,7 @@ export const TASK_SCHEDULE_MODE = {
 export const SCHEDULE_STATUS = {
   DRAFT: "DRAFT",
   RULES_SET: "RULES_SET",
+  PREVIEW: "PREVIEW",
   GENERATED: "GENERATED",
   PUBLISHED: "PUBLISHED",
   LOCKED: "LOCKED"
@@ -63,6 +64,7 @@ export const TASK_SCHEDULE_MODE_LABELS: Record<TaskScheduleModeValue, string> = 
 export const STATUS_LABELS: Record<ScheduleStatusValue, string> = {
   DRAFT: "\u8349\u7a3f",
   RULES_SET: "\u5df2\u8bbe\u7f6e\u89c4\u5219",
+  PREVIEW: "预览草稿",
   GENERATED: "\u5df2\u751f\u6210",
   PUBLISHED: "\u5df2\u53d1\u5e03",
   LOCKED: "\u5df2\u9501\u5b9a"
@@ -123,6 +125,7 @@ export function asTaskScheduleMode(value: string | null | undefined): TaskSchedu
 export function asScheduleStatus(value: string): ScheduleStatusValue {
   if (
     value === SCHEDULE_STATUS.RULES_SET ||
+    value === SCHEDULE_STATUS.PREVIEW ||
     value === SCHEDULE_STATUS.GENERATED ||
     value === SCHEDULE_STATUS.PUBLISHED ||
     value === SCHEDULE_STATUS.LOCKED

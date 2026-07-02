@@ -542,6 +542,8 @@ model ScheduleAssignment {
   doctorId       String
   doctor         ScheduleDoctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
   locked         Boolean        @default(false)
+  manualOverride Boolean        @default(false)
+  overrideReason String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -549,6 +551,7 @@ model ScheduleAssignment {
   @@index([departmentId])
   @@index([scheduleTaskId, date, timeSlot])
   @@index([scheduleTaskId, roomNumber])
+  @@index([scheduleTaskId, manualOverride])
   @@index([doctorId])
 }
 

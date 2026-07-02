@@ -30,6 +30,8 @@ export type AssignmentLike = {
   roomNumber: number;
   timeSlot: TimeSlotValue;
   locked: boolean;
+  manualOverride?: boolean;
+  overrideReason?: string | null;
 };
 
 export type ConflictLike = {
@@ -74,6 +76,7 @@ export type DoctorScheduleStats = {
   backupAssignments: number;
   workloadTotal: number;
   targetWorkloadFactor: number;
+  manualOverrideAssignments: number;
   assignments: DoctorAssignmentSummary[];
 };
 
@@ -145,6 +148,7 @@ export function calculateScheduleStats(input: {
       backupAssignments: 0,
       workloadTotal: 0,
       targetWorkloadFactor: policy.workloadFactor,
+      manualOverrideAssignments: 0,
       assignments: []
     });
   }
@@ -194,6 +198,9 @@ export function calculateScheduleStats(input: {
     if (category === SHIFT_TYPE_CATEGORY.ON_CALL) stats.onCallAssignments += 1;
     if (category === SHIFT_TYPE_CATEGORY.BACKUP) stats.backupAssignments += 1;
     stats.workloadTotal += Number(matchingCell?.shiftType?.workloadWeight ?? 1) || 1;
+    if (assignment.manualOverride) {
+      stats.manualOverrideAssignments += 1;
+    }
 
     if (!workedDateKeysByDoctor.has(assignment.doctorId)) {
       workedDateKeysByDoctor.set(assignment.doctorId, new Set());

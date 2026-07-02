@@ -288,6 +288,14 @@ function topIdentityRejection(rejections: string[]) {
 }
 
 export async function generateScheduleForTask(taskId: string) {
+  return generateScheduleForTaskWithStatus(taskId, SCHEDULE_STATUS.GENERATED);
+}
+
+export async function generateSchedulePreviewForTask(taskId: string) {
+  return generateScheduleForTaskWithStatus(taskId, SCHEDULE_STATUS.PREVIEW);
+}
+
+async function generateScheduleForTaskWithStatus(taskId: string, status: string) {
   const task = await prisma.scheduleTask.findUnique({
     where: { id: taskId },
     include: {
@@ -433,7 +441,7 @@ export async function generateScheduleForTask(taskId: string) {
 
     await tx.scheduleTask.update({
       where: { id: task.id },
-      data: { status: SCHEDULE_STATUS.GENERATED }
+      data: { status }
     });
   });
 
@@ -546,6 +554,19 @@ export async function rebuildConflictsForTask(taskId: string) {
         missingCount: null,
         description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} ${SLOT_LABELS[assignmentTimeSlot]}：已排人员不可用。`,
         severity: CONFLICT_SEVERITY.ERROR
+      });
+    }
+    if ((assignment as any).manualOverride) {
+      conflicts.push({
+        scheduleTaskId: task.id,
+        date: assignment.date,
+        weekday: assignment.weekday,
+        roomNumber: assignment.roomNumber,
+        timeSlot: assignmentTimeSlot,
+        conflictType: "MANUAL_OVERRIDE",
+        missingCount: null,
+        description: `${dateKey} ${getWeekdayLabel(assignment.weekday)} ${SLOT_LABELS[assignmentTimeSlot]}：管理员强制覆盖规则。${(assignment as any).overrideReason ? `原因：${(assignment as any).overrideReason}` : ""}`,
+        severity: CONFLICT_SEVERITY.WARNING
       });
     }
   }

@@ -1,6 +1,6 @@
 export type ScheduleMode = "FULL_DAY" | "HALF_DAY";
 export type TaskScheduleMode = "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
-export type ScheduleStatus = "DRAFT" | "RULES_SET" | "GENERATED" | "PUBLISHED" | "LOCKED";
+export type ScheduleStatus = "DRAFT" | "RULES_SET" | "PREVIEW" | "GENERATED" | "PUBLISHED" | "LOCKED";
 export type DoctorType = "RESIDENT" | "INTERN";
 export type TimeSlot = "FULL_DAY" | "MORNING" | "AFTERNOON";
 export type ConflictSeverity = "INFO" | "WARNING" | "ERROR";
@@ -68,6 +68,8 @@ export type ApiAssignment = {
   doctorId: string;
   doctor: ApiDoctor;
   locked: boolean;
+  manualOverride?: boolean;
+  overrideReason?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -119,6 +121,8 @@ export type DoctorStats = {
     timeSlotLabel: string;
     roomNumber: number;
     locked: boolean;
+    manualOverride?: boolean;
+    overrideReason?: string | null;
   }>;
 };
 
