@@ -45,7 +45,7 @@ export default async function GuestSchedulePage() {
             timeSlot: SLOT_LABELS[asTimeSlot(assignment.timeSlot)],
             room: `单元${assignment.roomNumber}`,
             doctor: assignment.doctor.name,
-            doctorType: assignment.doctor.doctorType === "INTERN" ? "B组" : "A组"
+            doctorType: assignment.doctor.doctorType === "INTERN" ? "轮转" : "固定"
           }));
           return (
             <div key={task.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-5 shadow-table">

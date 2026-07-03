@@ -43,6 +43,7 @@ import {
   type TaskScheduleMode,
   type TimeSlot
 } from "@/components/schedule-types";
+import { defaultWeeklyCount, isDayShiftType, isNightShiftType, sortWardShiftTypes, SPECIAL_DATE_TYPES } from "@/lib/ward-rules";
 
 type TabId = "requirements" | "unavailable" | "generate" | "schedule" | "adjust" | "export";
 type ScheduleView = "room" | "doctor";
@@ -57,6 +58,8 @@ type RequirementDayDraft = {
 };
 type RequirementDraft = Record<string, RequirementDayDraft>;
 type ShiftRequirementDraft = Record<string, Record<string, number>>;
+type WeeklyTemplateDraft = Record<number, Record<string, number>>;
+type DateOverrideDraft = Record<string, { overrideEnabled: boolean; dateType: string; note: string; counts: Record<string, number> }>;
 type ShiftTypeOption = { id: string; name: string; category: string; isNight: boolean; active: boolean };
 
 const TABS: Array<{ id: TabId; label: string; Icon: LucideIcon }> = [
@@ -67,6 +70,31 @@ const TABS: Array<{ id: TabId; label: string; Icon: LucideIcon }> = [
   { id: "adjust", label: "手动调整", Icon: Pencil },
   { id: "export", label: "导出", Icon: FileSpreadsheet }
 ];
+
+const WEEKDAY_ROWS = [1, 2, 3, 4, 5, 6, 7];
+const SPECIAL_DATE_OPTIONS = [
+  { value: "", label: "按普通日期" },
+  { value: SPECIAL_DATE_TYPES.PUBLIC_HOLIDAY, label: "法定节假日" },
+  { value: SPECIAL_DATE_TYPES.MAKEUP_WORKDAY, label: "调休上班日" },
+  { value: SPECIAL_DATE_TYPES.CUSTOM_REST_DAY, label: "自定义休息日" },
+  { value: SPECIAL_DATE_TYPES.CUSTOM_SPECIAL_DAY, label: "自定义特殊日" }
+];
+
+const specialDateLabels: Record<string, string> = {
+  [SPECIAL_DATE_TYPES.PUBLIC_HOLIDAY]: "法定节假日",
+  [SPECIAL_DATE_TYPES.MAKEUP_WORKDAY]: "调休上班日",
+  [SPECIAL_DATE_TYPES.CUSTOM_REST_DAY]: "自定义休息日",
+  [SPECIAL_DATE_TYPES.CUSTOM_SPECIAL_DAY]: "自定义特殊日"
+};
+
+function dateCardClass(weekday: number, dateType?: string) {
+  if (dateType === SPECIAL_DATE_TYPES.PUBLIC_HOLIDAY) return "bg-red-50 border-red-100";
+  if (dateType === SPECIAL_DATE_TYPES.MAKEUP_WORKDAY) return "bg-orange-50 border-orange-100";
+  if (dateType === SPECIAL_DATE_TYPES.CUSTOM_REST_DAY) return "bg-purple-50 border-purple-100";
+  if (dateType === SPECIAL_DATE_TYPES.CUSTOM_SPECIAL_DAY) return "bg-yellow-50 border-yellow-100";
+  if (weekday === 6 || weekday === 7) return "bg-sky-50 border-sky-100";
+  return "bg-white border-slate-200";
+}
 
 function doctorTypeBadge(doctorType: ApiDoctor["doctorType"]) {
   return doctorType === "RESIDENT"
@@ -147,6 +175,46 @@ function buildShiftRequirementDraft(task: ApiTaskDetail, shiftTypes: ShiftTypeOp
     const dateKey = toDateKey(requirement.date);
     if (!requirement.enabled || !requirement.shiftTypeId || !draft[dateKey]) continue;
     draft[dateKey][requirement.shiftTypeId] = clampRoomCount(requirement.requiredDoctors);
+  }
+  return draft;
+}
+
+function buildWeeklyTemplateDraft(task: ApiTaskDetail, shiftTypes: ShiftTypeOption[]): WeeklyTemplateDraft {
+  const sortedShiftTypes = sortWardShiftTypes(shiftTypes.filter((item) => item.active));
+  const draft: WeeklyTemplateDraft = {};
+  for (const weekday of WEEKDAY_ROWS) {
+    draft[weekday] = {};
+    for (const shiftType of sortedShiftTypes) {
+      draft[weekday][shiftType.id] = defaultWeeklyCount(weekday, shiftType);
+    }
+  }
+  if (task.weeklyTemplates?.length) {
+    for (const item of task.weeklyTemplates) {
+      if (!draft[item.weekday] || !sortedShiftTypes.some((shiftType) => shiftType.id === item.shiftTypeId)) continue;
+      draft[item.weekday][item.shiftTypeId] = item.enabled ? Math.max(0, Math.min(50, Math.floor(item.requiredDoctors))) : 0;
+    }
+  }
+  return draft;
+}
+
+function buildDateOverrideDraft(task: ApiTaskDetail, shiftTypes: ShiftTypeOption[]): DateOverrideDraft {
+  const sortedShiftTypes = sortWardShiftTypes(shiftTypes.filter((item) => item.active));
+  const draft: DateOverrideDraft = {};
+  for (const item of task.dateOverrides ?? []) {
+    const dateKey = toDateKey(item.date);
+    if (!draft[dateKey]) {
+      draft[dateKey] = {
+        overrideEnabled: Boolean(item.overrideEnabled),
+        dateType: item.dateType ?? "",
+        note: item.note ?? "",
+        counts: {}
+      };
+      for (const shiftType of sortedShiftTypes) draft[dateKey].counts[shiftType.id] = 0;
+    }
+    draft[dateKey].overrideEnabled = draft[dateKey].overrideEnabled || Boolean(item.overrideEnabled);
+    if (item.dateType) draft[dateKey].dateType = item.dateType;
+    if (item.note) draft[dateKey].note = item.note;
+    draft[dateKey].counts[item.shiftTypeId] = item.enabled ? Math.max(0, Math.min(50, Math.floor(item.requiredDoctors))) : 0;
   }
   return draft;
 }
@@ -250,6 +318,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   const [notice, setNotice] = useState("");
   const [requirementDraft, setRequirementDraft] = useState<RequirementDraft>({});
   const [shiftRequirementDraft, setShiftRequirementDraft] = useState<ShiftRequirementDraft>({});
+  const [weeklyTemplateDraft, setWeeklyTemplateDraft] = useState<WeeklyTemplateDraft>({});
+  const [dateOverrideDraft, setDateOverrideDraft] = useState<DateOverrideDraft>({});
+  const [selectedOverrideDate, setSelectedOverrideDate] = useState("");
   const [shiftTypes, setShiftTypes] = useState<ShiftTypeOption[]>([]);
   const [unavailableDraft, setUnavailableDraft] = useState<UnavailableDraft>({});
   const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
@@ -284,6 +355,8 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     if (!task) return;
     setRequirementDraft(buildRequirementDraft(task));
     setShiftRequirementDraft(buildShiftRequirementDraft(task, shiftTypes));
+    setWeeklyTemplateDraft(buildWeeklyTemplateDraft(task, shiftTypes));
+    setDateOverrideDraft(buildDateOverrideDraft(task, shiftTypes));
     const { draft, notes } = buildUnavailableDraft(task);
     setUnavailableDraft(draft);
     setNoteDraft(notes);
@@ -297,6 +370,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   );
   const requirementCells = useMemo(() => (task ? requirementsToCells(task.requirements) : []), [task]);
   const activeShiftTypes = useMemo(() => shiftTypes.filter((item) => item.active), [shiftTypes]);
+  const wardShiftTypes = useMemo(() => sortWardShiftTypes(activeShiftTypes), [activeShiftTypes]);
   const taskScheduleMode = currentTaskMode(task?.scheduleMode);
 
   useEffect(() => {
@@ -391,15 +465,43 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     setError("");
     setNotice("");
     try {
+      const isWardTemplate = currentTaskMode(task.scheduleMode) === TASK_SCHEDULE_MODE.WARD_SHIFT;
       const response = await fetch(`/api/tasks/${task.id}/requirements`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          records:
-            currentTaskMode(task.scheduleMode) === TASK_SCHEDULE_MODE.MEDTECH_ROOM
-              ? expandRequirementDraft(task, requirementDraft)
-              : expandShiftRequirementDraft(task, shiftRequirementDraft, activeShiftTypes)
-        })
+        body: JSON.stringify(
+          isWardTemplate
+            ? {
+                ruleMode: "WARD_WEEKLY_TEMPLATE",
+                weeklyTemplates: WEEKDAY_ROWS.flatMap((weekday) =>
+                  wardShiftTypes.map((shiftType) => ({
+                    weekday,
+                    shiftTypeId: shiftType.id,
+                    enabled: Number(weeklyTemplateDraft[weekday]?.[shiftType.id] ?? 0) > 0,
+                    requiredDoctors: Math.max(0, Math.min(50, Math.floor(Number(weeklyTemplateDraft[weekday]?.[shiftType.id] ?? 0))))
+                  }))
+                ),
+                dateOverrides: Object.entries(dateOverrideDraft)
+                  .filter(([, value]) => value.overrideEnabled || value.dateType || value.note.trim())
+                  .flatMap(([date, value]) =>
+                    wardShiftTypes.map((shiftType) => ({
+                      date,
+                      shiftTypeId: shiftType.id,
+                      dateType: value.dateType || null,
+                      note: value.note.trim() || null,
+                      overrideEnabled: value.overrideEnabled,
+                      enabled: Number(value.counts[shiftType.id] ?? 0) > 0,
+                      requiredDoctors: Math.max(0, Math.min(50, Math.floor(Number(value.counts[shiftType.id] ?? 0))))
+                    }))
+                  )
+              }
+            : {
+                records:
+                  currentTaskMode(task.scheduleMode) === TASK_SCHEDULE_MODE.MEDTECH_ROOM
+                    ? expandRequirementDraft(task, requirementDraft)
+                    : expandShiftRequirementDraft(task, shiftRequirementDraft, activeShiftTypes)
+              }
+        )
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message ?? "保存排班规则失败");
@@ -837,6 +939,305 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     }));
   }
 
+  function setWeeklyTemplateCount(weekday: number, shiftTypeId: string, value: number) {
+    const count = Math.max(0, Math.min(50, Math.floor(Number.isFinite(value) ? value : 0)));
+    setWeeklyTemplateDraft((previous) => ({
+      ...previous,
+      [weekday]: {
+        ...(previous[weekday] ?? {}),
+        [shiftTypeId]: count
+      }
+    }));
+  }
+
+  function fillWeeklyTemplate(target: "workday" | "weekend", shiftKind: "day" | "night", count: number) {
+    setWeeklyTemplateDraft((previous) => {
+      const next: WeeklyTemplateDraft = { ...previous };
+      for (const weekday of WEEKDAY_ROWS) {
+        const isWeekendDay = weekday === 6 || weekday === 7;
+        if ((target === "workday" && isWeekendDay) || (target === "weekend" && !isWeekendDay)) continue;
+        next[weekday] = { ...(next[weekday] ?? {}) };
+        for (const shiftType of wardShiftTypes) {
+          if (shiftKind === "day" && !isDayShiftType(shiftType)) continue;
+          if (shiftKind === "night" && !isNightShiftType(shiftType)) continue;
+          next[weekday][shiftType.id] = count;
+        }
+      }
+      return next;
+    });
+  }
+
+  function ensureOverrideDraft(dateKey: string) {
+    const day = weekDays.find((item) => item.dateKey === dateKey);
+    const counts: Record<string, number> = {};
+    for (const shiftType of wardShiftTypes) {
+      counts[shiftType.id] = weeklyTemplateDraft[day?.weekday ?? 1]?.[shiftType.id] ?? defaultWeeklyCount(day?.weekday ?? 1, shiftType);
+    }
+    const current = dateOverrideDraft[dateKey];
+    return {
+      overrideEnabled: current?.overrideEnabled ?? false,
+      dateType: current?.dateType ?? "",
+      note: current?.note ?? "",
+      counts: current?.counts ?? counts
+    };
+  }
+
+  function updateDateOverride(dateKey: string, patch: Partial<DateOverrideDraft[string]>) {
+    setDateOverrideDraft((previous) => {
+      const current = ensureOverrideDraft(dateKey);
+      return {
+        ...previous,
+        [dateKey]: {
+          ...current,
+          ...patch,
+          counts: patch.counts ?? current.counts
+        }
+      };
+    });
+  }
+
+  function setDateOverrideCount(dateKey: string, shiftTypeId: string, value: number) {
+    const count = Math.max(0, Math.min(50, Math.floor(Number.isFinite(value) ? value : 0)));
+    setDateOverrideDraft((previous) => {
+      const current = ensureOverrideDraft(dateKey);
+      return {
+        ...previous,
+        [dateKey]: {
+          ...current,
+          counts: {
+            ...current.counts,
+            [shiftTypeId]: count
+          }
+        }
+      };
+    });
+  }
+
+  function renderWardShiftRequirementControls() {
+    const selectedDay = selectedOverrideDate ? weekDays.find((day) => day.dateKey === selectedOverrideDate) : undefined;
+    const selectedOverride = selectedOverrideDate ? ensureOverrideDraft(selectedOverrideDate) : null;
+    const displayedDays = activeRulesMonth ? weekDays.filter((day) => day.monthKey === activeRulesMonth) : visibleWeekDays;
+
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-950">病房白班/夜班规则</h3>
+            <p className="mt-1 max-w-3xl text-sm text-slate-600">
+              先按一周模板设置每天白班、夜班所需人数，系统会自动套用到整个排班周期。遇到节假日、调休或科室特殊安排，可在特殊日期日历中单独调整。
+            </p>
+          </div>
+          <button
+            onClick={() => void saveRequirements()}
+            disabled={busy === "save-requirements" || wardShiftTypes.length === 0}
+            className="focus-ring inline-flex w-fit items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:bg-slate-300"
+          >
+            <Save size={16} />
+            {busy === "save-requirements" ? "正在保存..." : "保存规则"}
+          </button>
+        </div>
+
+        {wardShiftTypes.length === 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            暂无启用班次。请先到“班次身份要求”新增白班、夜班等班次。
+          </div>
+        ) : null}
+
+        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
+          <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h4 className="font-semibold text-slate-950">一周模板</h4>
+              <p className="mt-1 text-xs text-slate-500">只维护 7 行，系统会按周期自动展开。</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => fillWeeklyTemplate("workday", "day", 1)} className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50">工作日白班填 1</button>
+              <button type="button" onClick={() => fillWeeklyTemplate("workday", "night", 1)} className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50">工作日夜班填 1</button>
+              <button type="button" onClick={() => fillWeeklyTemplate("weekend", "day", 1)} className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50">周末白班填 1</button>
+              <button type="button" onClick={() => fillWeeklyTemplate("weekend", "night", 1)} className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50">周末夜班填 1</button>
+              <button
+                type="button"
+                onClick={() => {
+                  const next: WeeklyTemplateDraft = {};
+                  for (const weekday of WEEKDAY_ROWS) {
+                    next[weekday] = {};
+                    for (const shiftType of wardShiftTypes) next[weekday][shiftType.id] = 0;
+                  }
+                  setWeeklyTemplateDraft(next);
+                }}
+                className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                全部清空
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const monday = weeklyTemplateDraft[1] ?? {};
+                  setWeeklyTemplateDraft((previous) => {
+                    const next = { ...previous };
+                    for (const weekday of [1, 2, 3, 4, 5]) next[weekday] = { ...monday };
+                    return next;
+                  });
+                }}
+                className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                复制周一到工作日
+              </button>
+              <button
+                type="button"
+                onClick={() => setWeeklyTemplateDraft((previous) => ({ ...previous, 7: { ...(previous[6] ?? {}) } }))}
+                className="focus-ring rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                复制周六到周日
+              </button>
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table className="min-w-[560px] w-full border-collapse text-sm">
+              <thead className="bg-slate-50 text-left text-slate-600">
+                <tr>
+                  <th className="border-b border-slate-200 px-3 py-3 font-medium">星期</th>
+                  {wardShiftTypes.map((shiftType) => (
+                    <th key={shiftType.id} className="border-b border-slate-200 px-3 py-3 font-medium">
+                      {shiftType.name}
+                      {isNightShiftType(shiftType) ? <span className="ml-1 rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">夜班</span> : null}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {WEEKDAY_ROWS.map((weekday) => (
+                  <tr key={weekday}>
+                    <td className="border-b border-slate-100 px-3 py-3 font-medium text-slate-900">{getWeekdayLabel(weekday)}</td>
+                    {wardShiftTypes.map((shiftType) => (
+                      <td key={shiftType.id} className="border-b border-slate-100 px-3 py-3">
+                        <input
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={weeklyTemplateDraft[weekday]?.[shiftType.id] ?? 0}
+                          onChange={(event) => setWeeklyTemplateCount(weekday, shiftType.id, Number(event.target.value))}
+                          className="focus-ring w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-table">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h4 className="font-semibold text-slate-950">特殊日期调整</h4>
+              <p className="mt-1 text-xs text-slate-500">点击日期卡片，单独设置节假日、调休或覆盖当日白班/夜班人数。</p>
+            </div>
+            {ruleMonthOptions.length > 1 ? (
+              <select value={activeRulesMonth} onChange={(event) => setActiveRulesMonth(event.target.value)} className="focus-ring w-fit rounded-md border border-slate-300 px-3 py-2 text-sm">
+                {ruleMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}
+              </select>
+            ) : null}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600">
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded border border-slate-200 bg-white" />普通工作日</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded border border-sky-100 bg-sky-50" />周末</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded border border-red-100 bg-red-50" />法定节假日</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded border border-orange-100 bg-orange-50" />调休上班日</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded border border-purple-100 bg-purple-50" />自定义休息日</span>
+            <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded border border-yellow-100 bg-yellow-50" />自定义特殊日</span>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-7">
+            {displayedDays.map((day) => {
+              const override = dateOverrideDraft[day.dateKey];
+              const counts = override?.overrideEnabled ? override.counts : weeklyTemplateDraft[day.weekday] ?? {};
+              return (
+                <button
+                  type="button"
+                  key={day.dateKey}
+                  onClick={() => setSelectedOverrideDate(day.dateKey)}
+                  className={`focus-ring min-h-36 rounded-lg border p-3 text-left shadow-sm ${dateCardClass(day.weekday, override?.dateType)} ${selectedOverrideDate === day.dateKey ? "ring-2 ring-hospital-green" : ""}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-slate-950">{day.dateKey.slice(5)}</div>
+                      <div className="text-xs text-slate-500">{day.label}</div>
+                    </div>
+                    {override?.overrideEnabled ? <span className="rounded-full bg-hospital-green px-2 py-0.5 text-[11px] text-white">已覆盖</span> : null}
+                  </div>
+                  {override?.dateType ? <div className="mt-2 inline-flex rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-slate-700">{specialDateLabels[override.dateType] ?? override.dateType}</div> : null}
+                  <div className="mt-3 space-y-1 text-xs text-slate-700">
+                    {wardShiftTypes.map((shiftType) => (
+                      <div key={shiftType.id} className="flex justify-between gap-2">
+                        <span>{shiftType.name}</span>
+                        <span className="font-medium">{counts[shiftType.id] ?? 0} 人</span>
+                      </div>
+                    ))}
+                  </div>
+                  {override?.note ? <div className="mt-2 line-clamp-2 text-xs text-slate-500">{override.note}</div> : null}
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedDay && selectedOverride ? (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h5 className="font-semibold text-slate-950">{selectedDay.dateKey} {selectedDay.label}</h5>
+                <button type="button" onClick={() => setSelectedOverrideDate("")} className="w-fit text-xs font-medium text-slate-500 hover:text-slate-900">关闭</button>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-600">日期类型</span>
+                  <select
+                    value={selectedOverride.dateType}
+                    onChange={(event) => updateDateOverride(selectedDay.dateKey, { dateType: event.target.value })}
+                    className="focus-ring mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  >
+                    {SPECIAL_DATE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 self-end rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={selectedOverride.overrideEnabled}
+                    onChange={(event) => updateDateOverride(selectedDay.dateKey, { overrideEnabled: event.target.checked })}
+                  />
+                  覆盖一周模板，使用下方人数
+                </label>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {wardShiftTypes.map((shiftType) => (
+                  <label key={shiftType.id} className="block">
+                    <span className="text-xs font-medium text-slate-600">{shiftType.name}人数</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      disabled={!selectedOverride.overrideEnabled}
+                      value={selectedOverride.counts[shiftType.id] ?? 0}
+                      onChange={(event) => setDateOverrideCount(selectedDay.dateKey, shiftType.id, Number(event.target.value))}
+                      className="focus-ring mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-100"
+                    />
+                  </label>
+                ))}
+              </div>
+              <label className="mt-3 block">
+                <span className="text-xs font-medium text-slate-600">备注</span>
+                <input
+                  value={selectedOverride.note}
+                  onChange={(event) => updateDateOverride(selectedDay.dateKey, { note: event.target.value })}
+                  className="focus-ring mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  placeholder="例如节假日、调休、科室临时安排"
+                />
+              </label>
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
   function renderShiftRequirementControls() {
     const isCustom = taskScheduleMode === TASK_SCHEDULE_MODE.CUSTOM;
     return (
@@ -938,7 +1339,10 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
   }
 
   function renderRequirementControls() {
-    if (taskScheduleMode !== TASK_SCHEDULE_MODE.MEDTECH_ROOM) {
+    if (taskScheduleMode === TASK_SCHEDULE_MODE.WARD_SHIFT) {
+      return renderWardShiftRequirementControls();
+    }
+    if (taskScheduleMode === TASK_SCHEDULE_MODE.CUSTOM) {
       return renderShiftRequirementControls();
     }
 

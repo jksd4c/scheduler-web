@@ -3,7 +3,7 @@ import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { DOCTOR_TYPE } from "@/lib/schedule-rules";
-import { ROSTER_STATUS } from "@/lib/roster-workflow";
+import { ROSTER_STATUS, STAFF_POOL_TYPE } from "@/lib/roster-workflow";
 import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
@@ -71,8 +71,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 async function ensureStaffProfile(tx: any, unitId: string, entry: any) {
   const profile = await tx.staffProfile.upsert({
     where: { unitId_displayName: { unitId, displayName: entry.expectedName } },
-    update: { phone: entry.expectedPhone || undefined, active: true },
-    create: { unitId, displayName: entry.expectedName, phone: entry.expectedPhone, active: true }
+    update: { phone: entry.expectedPhone || undefined, poolType: entry.poolType === STAFF_POOL_TYPE.ROTATION ? STAFF_POOL_TYPE.ROTATION : STAFF_POOL_TYPE.CORE, active: true },
+    create: { unitId, displayName: entry.expectedName, phone: entry.expectedPhone, poolType: entry.poolType === STAFF_POOL_TYPE.ROTATION ? STAFF_POOL_TYPE.ROTATION : STAFF_POOL_TYPE.CORE, active: true }
   });
   const tagIds = Array.isArray(entry.identityTagIds) ? entry.identityTagIds.map(String).filter(Boolean) : [];
   if (tagIds.length) {
@@ -90,15 +90,16 @@ async function ensureScheduleDoctor(tx: any, scheduleTaskId: string, departmentI
   const tags = profile.tags.map((item: any) => item.staffTag);
   const tagSnapshot = buildTagSnapshot(tags);
   const policySnapshot = resolveEffectivePolicy(tags);
+  const doctorType = profile.poolType === STAFF_POOL_TYPE.ROTATION ? DOCTOR_TYPE.INTERN : DOCTOR_TYPE.RESIDENT;
   const doctor = await tx.scheduleDoctor.upsert({
     where: { scheduleTaskId_name: { scheduleTaskId, name: profile.displayName } },
-    update: { staffProfileId: profile.id, active: true, tagSnapshotJson: tagSnapshot, policySnapshotJson: policySnapshot },
+    update: { staffProfileId: profile.id, doctorType, active: true, tagSnapshotJson: tagSnapshot, policySnapshotJson: policySnapshot },
     create: {
       departmentId,
       scheduleTaskId,
       staffProfileId: profile.id,
       name: profile.displayName,
-      doctorType: DOCTOR_TYPE.RESIDENT,
+      doctorType,
       active: true,
       tagSnapshotJson: tagSnapshot,
       policySnapshotJson: policySnapshot

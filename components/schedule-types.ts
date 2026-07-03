@@ -1,7 +1,7 @@
 export type ScheduleMode = "FULL_DAY" | "HALF_DAY";
 export type TaskScheduleMode = "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
 export type ScheduleStatus = "DRAFT" | "RULES_SET" | "PREVIEW" | "GENERATED" | "PUBLISHED" | "LOCKED";
-export type SchedulePeriodType = "DAYS_7" | "DAYS_30" | "CALENDAR_MONTH" | "QUARTER" | "YEAR" | "CUSTOM";
+export type SchedulePeriodType = "DAYS_7" | "DAYS_30" | "CALENDAR_MONTH" | "QUARTER" | "HALF_YEAR" | "YEAR" | "CUSTOM";
 export type DoctorType = "RESIDENT" | "INTERN";
 export type TimeSlot = "FULL_DAY" | "MORNING" | "AFTERNOON";
 export type ConflictSeverity = "INFO" | "WARNING" | "ERROR";
@@ -175,11 +175,36 @@ export type ApiTaskDetail = {
   doctors: ApiDoctor[];
   unavailableTimes: ApiUnavailableTime[];
   requirements: ApiRequirement[];
+  weeklyTemplates?: ApiWeeklyTemplate[];
+  dateOverrides?: ApiDateOverride[];
   assignments: ApiAssignment[];
   conflicts: ApiConflict[];
   stats: ScheduleStats;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ApiWeeklyTemplate = {
+  id: string;
+  scheduleTaskId: string;
+  weekday: number;
+  shiftTypeId: string;
+  shiftType?: ApiRequirement["shiftType"];
+  enabled: boolean;
+  requiredDoctors: number;
+};
+
+export type ApiDateOverride = {
+  id: string;
+  scheduleTaskId: string;
+  date: string;
+  shiftTypeId: string;
+  shiftType?: ApiRequirement["shiftType"];
+  dateType?: string | null;
+  note?: string | null;
+  overrideEnabled: boolean;
+  enabled: boolean;
+  requiredDoctors: number;
 };
 
 export type ApiTaskListItem = {
@@ -213,6 +238,6 @@ export type ApiTaskListItem = {
 };
 
 export const DOCTOR_TYPE_LABEL: Record<DoctorType, string> = {
-  RESIDENT: "A组",
-  INTERN: "B组"
+  RESIDENT: "固定",
+  INTERN: "轮转"
 };

@@ -194,6 +194,8 @@ model ScheduleTask {
   doctors          ScheduleDoctor[]
   participants     ScheduleParticipant[]
   unavailableTimes DoctorUnavailableTime[]
+  weeklyTemplates   ScheduleWeeklyTemplate[]
+  dateOverrides     ScheduleDateOverride[]
   requirements     ScheduleRequirement[]
   assignments      ScheduleAssignment[]
   conflicts        ScheduleConflict[]
@@ -248,6 +250,7 @@ model RosterEntry {
   scheduleTaskId      String?
   staffPoolId         String?
   staffProfileId      String?
+  staffProfile        StaffProfile? @relation(fields: [staffProfileId], references: [id], onDelete: SetNull)
   userId              String?
   poolType            String
   expectedName        String
@@ -392,6 +395,8 @@ model ScheduleRequirement {
   enabled         Boolean      @default(true)
   roomNumber      Int
   requiredDoctors Int
+  source          String       @default("MANUAL")
+  sourceWeekday   Int?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -399,7 +404,48 @@ model ScheduleRequirement {
   @@index([departmentId])
   @@index([scheduleTaskId])
   @@index([shiftTypeId])
+  @@index([source])
   @@index([date, timeSlot])
+}
+
+model ScheduleWeeklyTemplate {
+  id              String       @id @default(cuid())
+  scheduleTaskId  String
+  scheduleTask    ScheduleTask @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  weekday         Int
+  shiftTypeId     String
+  shiftType       ShiftType    @relation(fields: [shiftTypeId], references: [id], onDelete: Cascade)
+  enabled         Boolean      @default(true)
+  requiredDoctors Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([scheduleTaskId, weekday, shiftTypeId])
+  @@index([scheduleTaskId])
+  @@index([weekday])
+  @@index([shiftTypeId])
+}
+
+model ScheduleDateOverride {
+  id              String       @id @default(cuid())
+  scheduleTaskId  String
+  scheduleTask    ScheduleTask @relation(fields: [scheduleTaskId], references: [id], onDelete: Cascade)
+  date            DateTime
+  shiftTypeId     String
+  shiftType       ShiftType    @relation(fields: [shiftTypeId], references: [id], onDelete: Cascade)
+  dateType        String?
+  note            String?
+  overrideEnabled Boolean      @default(false)
+  enabled         Boolean      @default(true)
+  requiredDoctors Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([scheduleTaskId, date, shiftTypeId])
+  @@index([scheduleTaskId])
+  @@index([date])
+  @@index([shiftTypeId])
+  @@index([overrideEnabled])
 }
 
 model StaffTag {
@@ -467,11 +513,13 @@ model StaffProfile {
   userId          String?
   user            User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
   displayName     String
+  poolType        String                @default("CORE")
   phone           String?
   email           String?
   active          Boolean               @default(true)
   note            String?
   tags            StaffProfileTag[]
+  rosterEntries   RosterEntry[]
   scheduleDoctors ScheduleDoctor[]
   participants    ScheduleParticipant[]
   createdAt       DateTime              @default(now())
@@ -482,6 +530,7 @@ model StaffProfile {
   @@unique([unitId, email])
   @@index([unitId])
   @@index([userId])
+  @@index([poolType])
   @@index([active])
   @@index([unitId, active])
 }
@@ -534,6 +583,8 @@ model ShiftType {
   active         Boolean                @default(true)
   requiredTags   ShiftTypeRequiredTag[]
   requirements   ScheduleRequirement[]
+  weeklyTemplates ScheduleWeeklyTemplate[]
+  dateOverrides  ScheduleDateOverride[]
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
 

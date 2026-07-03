@@ -3,7 +3,7 @@ import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { DOCTOR_TYPE } from "@/lib/schedule-rules";
-import { evaluateFeedbackStatus, JOIN_REVIEW_STATUS, MEMBER_FEEDBACK_STATUS, ROSTER_STATUS } from "@/lib/roster-workflow";
+import { evaluateFeedbackStatus, JOIN_REVIEW_STATUS, MEMBER_FEEDBACK_STATUS, ROSTER_STATUS, STAFF_POOL_TYPE } from "@/lib/roster-workflow";
 import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
@@ -55,8 +55,8 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       const tagIds = Array.isArray(rosterEntry?.identityTagIds) ? rosterEntry?.identityTagIds.map(String).filter(Boolean) : [];
       const staffProfile = await tx.staffProfile.upsert({
         where: { unitId_displayName: { unitId: unit.id, displayName } },
-        update: { userId: inputUser.id, phone: current.inputPhone, active: true },
-        create: { unitId: unit.id, userId: inputUser.id, displayName, phone: current.inputPhone, active: true }
+        update: { userId: inputUser.id, phone: current.inputPhone, poolType: STAFF_POOL_TYPE.ROTATION, active: true },
+        create: { unitId: unit.id, userId: inputUser.id, displayName, phone: current.inputPhone, poolType: STAFF_POOL_TYPE.ROTATION, active: true }
       });
       if (tagIds.length) {
         await tx.staffProfileTag.createMany({ data: tagIds.map((staffTagId) => ({ staffProfileId: staffProfile.id, staffTagId })), skipDuplicates: true });
@@ -117,15 +117,16 @@ async function ensureScheduleDoctor(tx: any, scheduleTaskId: string, departmentI
   const tags = profile.tags.map((item: any) => item.staffTag);
   const tagSnapshot = buildTagSnapshot(tags);
   const policySnapshot = resolveEffectivePolicy(tags);
+  const doctorType = profile.poolType === STAFF_POOL_TYPE.ROTATION ? DOCTOR_TYPE.INTERN : DOCTOR_TYPE.RESIDENT;
   const doctor = await tx.scheduleDoctor.upsert({
     where: { scheduleTaskId_name: { scheduleTaskId, name: profile.displayName } },
-    update: { staffProfileId: profile.id, active: true, tagSnapshotJson: tagSnapshot, policySnapshotJson: policySnapshot },
+    update: { staffProfileId: profile.id, doctorType, active: true, tagSnapshotJson: tagSnapshot, policySnapshotJson: policySnapshot },
     create: {
       departmentId,
       scheduleTaskId,
       staffProfileId: profile.id,
       name: profile.displayName,
-      doctorType: DOCTOR_TYPE.RESIDENT,
+      doctorType,
       active: true,
       tagSnapshotJson: tagSnapshot,
       policySnapshotJson: policySnapshot

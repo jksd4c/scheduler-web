@@ -13,6 +13,26 @@ export async function getTaskDetail(taskId: string) {
       unavailableTimes: {
         orderBy: [{ date: "asc" }, { timeSlot: "asc" }]
       },
+      weeklyTemplates: {
+        include: {
+          shiftType: {
+            include: {
+              requiredTags: { include: { staffTag: true } }
+            }
+          }
+        },
+        orderBy: [{ weekday: "asc" }]
+      },
+      dateOverrides: {
+        include: {
+          shiftType: {
+            include: {
+              requiredTags: { include: { staffTag: true } }
+            }
+          }
+        },
+        orderBy: [{ date: "asc" }]
+      },
       requirements: {
         include: {
           shiftType: {

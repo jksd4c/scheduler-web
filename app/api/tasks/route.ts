@@ -6,6 +6,7 @@ import { dateFromKey, getDateRangeDayCount, getPeriodRange, getTodayDateKey, toD
 import { mergeDoctorNameLists } from "@/lib/name-parser";
 import { getDefaultActiveUnit, getOrCreateDefaultUnit } from "@/lib/organizations";
 import { prisma } from "@/lib/prisma";
+import { ROSTER_STATUS, STAFF_POOL_TYPE } from "@/lib/roster-workflow";
 import { DOCTOR_TYPE, SCHEDULE_MODE, SCHEDULE_PERIOD_TYPE, SCHEDULE_STATUS, TASK_SCHEDULE_MODE, asPeriodType, asTaskScheduleMode } from "@/lib/schedule-rules";
 import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
@@ -88,6 +89,7 @@ export async function POST(request: Request) {
       year: Number(body.year) || undefined,
       month: Number(body.month) || undefined,
       quarter: Number(body.quarter) || undefined,
+      half: Number(body.half) || undefined,
       endDate: requestedEndDate || undefined
     });
     const startDate = periodRange.startDate;
@@ -128,7 +130,15 @@ export async function POST(request: Request) {
       String(body.residentNames ?? body.residentsText ?? ""),
       String(body.internNames ?? body.internsText ?? "")
     );
-    const requestedStaffProfileIds = Array.isArray(body.staffProfileIds) ? body.staffProfileIds.map(String).filter(Boolean) : [];
+    const requestedStaffProfileIds: string[] = Array.isArray(body.staffProfileIds) ? body.staffProfileIds.map(String).filter(Boolean) : [];
+
+    if ((scheduleMode === TASK_SCHEDULE_MODE.WARD_SHIFT || scheduleMode === TASK_SCHEDULE_MODE.CUSTOM) && residents.length + interns.length > 0) {
+      return withApiTiming(NextResponse.json({ message: "请从本次排班工作池选择人员，病房白班/夜班和高级自定义不再使用 A/B 文本名单。" }, { status: 400 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
+    }
 
     if (residents.length + interns.length + requestedStaffProfileIds.length === 0) {
       return withApiTiming(NextResponse.json({ message: "请至少输入一名人员" }, { status: 400 }), {
@@ -200,16 +210,36 @@ export async function POST(request: Request) {
             tags: {
               include: { staffTag: { include: { policy: true } } },
               orderBy: { createdAt: "asc" }
+            },
+            rosterEntries: {
+              where: {
+                unitId,
+                poolType: STAFF_POOL_TYPE.ROTATION,
+                status: ROSTER_STATUS.CONFIRMED,
+                includeInScheduling: true
+              },
+              select: { id: true },
+              take: 1
             }
           }
         })
       : [];
-    const selectedNames = new Set(staffProfiles.map((profile) => profile.displayName));
+    const eligibleStaffProfiles = staffProfiles.filter((profile) => profile.poolType !== STAFF_POOL_TYPE.ROTATION || profile.rosterEntries.length > 0);
+    const selectedProfileIds = new Set(eligibleStaffProfiles.map((profile) => profile.id));
+    const invalidProfileIds = requestedStaffProfileIds.filter((id) => !selectedProfileIds.has(id));
+    if (invalidProfileIds.length > 0) {
+      return withApiTiming(NextResponse.json({ message: "本次排班工作池中存在未确认或不可用的轮转人员，请先完成确认后再创建任务。" }, { status: 400 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
+    }
+    const selectedNames = new Set(eligibleStaffProfiles.map((profile) => profile.displayName));
     const manualDoctors = [
       ...residents.filter((name) => !selectedNames.has(name)).map((name) => ({ departmentId, name, doctorType: DOCTOR_TYPE.RESIDENT })),
       ...interns.filter((name) => !selectedNames.has(name)).map((name) => ({ departmentId, name, doctorType: DOCTOR_TYPE.INTERN }))
     ];
-    const profileDoctors = staffProfiles.map((profile) => {
+    const profileDoctors = eligibleStaffProfiles.map((profile) => {
       const tags = profile.tags.map((item) => item.staffTag);
       const tagSnapshot = buildTagSnapshot(tags);
       const policySnapshot = resolveEffectivePolicy(tags);
@@ -217,7 +247,7 @@ export async function POST(request: Request) {
         departmentId,
         staffProfileId: profile.id,
         name: profile.displayName,
-        doctorType: DOCTOR_TYPE.RESIDENT,
+        doctorType: profile.poolType === STAFF_POOL_TYPE.ROTATION ? DOCTOR_TYPE.INTERN : DOCTOR_TYPE.RESIDENT,
         active: profile.active,
         tagSnapshotJson: tagSnapshot,
         policySnapshotJson: policySnapshot
@@ -291,7 +321,7 @@ export async function POST(request: Request) {
         mode,
         scheduleMode,
         periodDays,
-        staffProfileCount: staffProfiles.length,
+        staffProfileCount: eligibleStaffProfiles.length,
         manualPersonnelCount: manualDoctors.length,
         personnelCount: task.doctors.length
       },

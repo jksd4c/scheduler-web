@@ -412,13 +412,20 @@ async function main() {
     method: "PUT",
     headers: { Cookie: registerResult.cookie },
     body: JSON.stringify({
-      records: [
-        { date: smokeStartDate, weekday: 1, timeSlot: "FULL_DAY", roomNumber: 1, requiredDoctors: 1, enabled: true, shiftTypeId: secondLineShift.id },
-        { date: smokeStartDate, weekday: 1, timeSlot: "FULL_DAY", roomNumber: 2, requiredDoctors: 2, enabled: true, shiftTypeId: nightShift.id }
+      ruleMode: "WARD_WEEKLY_TEMPLATE",
+      weeklyTemplates: [1, 2, 3, 4, 5, 6, 7].flatMap((weekday) => [
+        { weekday, shiftTypeId: secondLineShift.id, requiredDoctors: 1, enabled: true },
+        { weekday, shiftTypeId: nightShift.id, requiredDoctors: weekday === 1 ? 2 : 1, enabled: true }
+      ]),
+      dateOverrides: [
+        { date: smokeStartDate, shiftTypeId: secondLineShift.id, dateType: "PUBLIC_HOLIDAY", overrideEnabled: true, requiredDoctors: 1, enabled: true },
+        { date: smokeStartDate, shiftTypeId: nightShift.id, dateType: "PUBLIC_HOLIDAY", overrideEnabled: true, requiredDoctors: 2, enabled: true }
       ]
     })
   });
-  assert(requirementsResult.response.status === 200, "saved requirements with shift type identity rules");
+  assert(requirementsResult.response.status === 200, "saved WARD weekly template requirements with date override");
+  assert(requirementsResult.data.task.weeklyTemplates.length > 0, "WARD weekly templates are persisted");
+  assert(requirementsResult.data.task.dateOverrides.length > 0, "WARD date overrides are persisted");
 
   const generateResult = await jsonRequest(`/api/tasks/${taskId}/generate`, {
     method: "POST",

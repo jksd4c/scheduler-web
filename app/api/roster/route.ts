@@ -111,8 +111,8 @@ export async function POST(request: Request) {
 async function upsertCoreStaffProfile(tx: any, unitId: string, displayName: string, phone: string | null, tagIds: string[]) {
   const profile = await tx.staffProfile.upsert({
     where: { unitId_displayName: { unitId, displayName } },
-    update: { phone: phone || undefined, active: true },
-    create: { unitId, displayName, phone, active: true }
+    update: { phone: phone || undefined, poolType: "CORE", active: true },
+    create: { unitId, displayName, poolType: "CORE", phone, active: true }
   });
   if (tagIds.length) {
     await tx.staffProfileTag.createMany({ data: tagIds.map((staffTagId) => ({ staffProfileId: profile.id, staffTagId })), skipDuplicates: true });
@@ -129,15 +129,16 @@ async function ensureScheduleDoctor(tx: any, scheduleTaskId: string, departmentI
   const tags = profile.tags.map((item: any) => item.staffTag);
   const tagSnapshot = buildTagSnapshot(tags);
   const policySnapshot = resolveEffectivePolicy(tags);
+  const doctorType = profile.poolType === STAFF_POOL_TYPE.ROTATION ? DOCTOR_TYPE.INTERN : DOCTOR_TYPE.RESIDENT;
   const doctor = await tx.scheduleDoctor.upsert({
     where: { scheduleTaskId_name: { scheduleTaskId, name: profile.displayName } },
-    update: { staffProfileId: profile.id, active: true, tagSnapshotJson: tagSnapshot, policySnapshotJson: policySnapshot },
+    update: { staffProfileId: profile.id, doctorType, active: true, tagSnapshotJson: tagSnapshot, policySnapshotJson: policySnapshot },
     create: {
       departmentId,
       scheduleTaskId,
       staffProfileId: profile.id,
       name: profile.displayName,
-      doctorType: DOCTOR_TYPE.RESIDENT,
+      doctorType,
       active: true,
       tagSnapshotJson: tagSnapshot,
       policySnapshotJson: policySnapshot

@@ -33,6 +33,7 @@ export const SCHEDULE_PERIOD_TYPE = {
   DAYS_30: "DAYS_30",
   CALENDAR_MONTH: "CALENDAR_MONTH",
   QUARTER: "QUARTER",
+  HALF_YEAR: "HALF_YEAR",
   YEAR: "YEAR",
   CUSTOM: "CUSTOM"
 } as const;
@@ -85,6 +86,7 @@ export const PERIOD_TYPE_LABELS: Record<SchedulePeriodTypeValue, string> = {
   DAYS_30: "30 天",
   CALENDAR_MONTH: "自然月",
   QUARTER: "季度",
+  HALF_YEAR: "半年",
   YEAR: "年度",
   CUSTOM: "自定义"
 };
@@ -94,6 +96,7 @@ export function asPeriodType(value: string | null | undefined): SchedulePeriodTy
     value === SCHEDULE_PERIOD_TYPE.DAYS_7 ||
     value === SCHEDULE_PERIOD_TYPE.CALENDAR_MONTH ||
     value === SCHEDULE_PERIOD_TYPE.QUARTER ||
+    value === SCHEDULE_PERIOD_TYPE.HALF_YEAR ||
     value === SCHEDULE_PERIOD_TYPE.YEAR ||
     value === SCHEDULE_PERIOD_TYPE.CUSTOM
   ) {
@@ -148,10 +151,10 @@ export function asScheduleMode(value: string): ScheduleModeValue {
 }
 
 export function asTaskScheduleMode(value: string | null | undefined): TaskScheduleModeValue {
-  if (value === TASK_SCHEDULE_MODE.WARD_SHIFT || value === TASK_SCHEDULE_MODE.CUSTOM) {
+  if (value === TASK_SCHEDULE_MODE.WARD_SHIFT || value === TASK_SCHEDULE_MODE.MEDTECH_ROOM || value === TASK_SCHEDULE_MODE.CUSTOM) {
     return value;
   }
-  return TASK_SCHEDULE_MODE.MEDTECH_ROOM;
+  return TASK_SCHEDULE_MODE.WARD_SHIFT;
 }
 
 export function asScheduleStatus(value: string): ScheduleStatusValue {

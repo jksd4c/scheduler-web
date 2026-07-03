@@ -1,7 +1,7 @@
 export const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"] as const;
 
 export type WeekdayNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7;
-export type PeriodType = "DAYS_7" | "DAYS_30" | "CALENDAR_MONTH" | "QUARTER" | "YEAR" | "CUSTOM";
+export type PeriodType = "DAYS_7" | "DAYS_30" | "CALENDAR_MONTH" | "QUARTER" | "HALF_YEAR" | "YEAR" | "CUSTOM";
 
 export function pad2(value: number) {
   return String(value).padStart(2, "0");
@@ -93,7 +93,7 @@ export function getMonthEndDateKey(year: number, month: number) {
   return toDateKey(new Date(Date.UTC(year, month, 0)));
 }
 
-export function getPeriodRange(periodType: PeriodType, startDateKey: string, options?: { year?: number; month?: number; quarter?: number; endDate?: string }) {
+export function getPeriodRange(periodType: PeriodType, startDateKey: string, options?: { year?: number; month?: number; quarter?: number; half?: number; endDate?: string }) {
   const start = startDateKey || getTodayDateKey();
   if (periodType === "DAYS_7") return { startDate: start, endDate: toDateKey(addDays(start, 6)) };
   if (periodType === "DAYS_30") return { startDate: start, endDate: toDateKey(addDays(start, 29)) };
@@ -108,6 +108,12 @@ export function getPeriodRange(periodType: PeriodType, startDateKey: string, opt
     const quarter = Math.max(1, Math.min(4, options?.quarter ?? Math.floor((Number(start.slice(5, 7)) - 1) / 3) + 1));
     const firstMonth = (quarter - 1) * 3 + 1;
     return { startDate: `${year}-${pad2(firstMonth)}-01`, endDate: getMonthEndDateKey(year, firstMonth + 2) };
+  }
+  if (periodType === "HALF_YEAR") {
+    const year = options?.year ?? Number(start.slice(0, 4));
+    const half = options?.half === 2 ? 2 : 1;
+    const firstMonth = half === 1 ? 1 : 7;
+    return { startDate: `${year}-${pad2(firstMonth)}-01`, endDate: getMonthEndDateKey(year, firstMonth + 5) };
   }
   if (periodType === "YEAR") {
     const year = options?.year ?? Number(start.slice(0, 4));

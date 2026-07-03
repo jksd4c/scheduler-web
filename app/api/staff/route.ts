@@ -67,6 +67,7 @@ export async function POST(request: Request) {
         data: names.map((displayName) => ({
           unitId: unit.id,
           displayName,
+          poolType: "CORE",
           phone: singleContact ? nullableString(body.phone) : null,
           email: singleContact ? nullableString(body.email) : null,
           note,

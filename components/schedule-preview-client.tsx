@@ -32,6 +32,9 @@ type CalendarDay = {
 type PreviewData = {
   task: {
     id: string;
+    startDate: string;
+    endDate: string;
+    periodType: "DAYS_7" | "DAYS_30" | "CALENDAR_MONTH" | "QUARTER" | "HALF_YEAR" | "YEAR" | "CUSTOM";
     weekStartDate: string;
     weekEndDate: string;
     scheduleMode: "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
@@ -72,6 +75,29 @@ const dateTypeClass: Record<string, string> = {
   CUSTOM_SPECIAL: "bg-yellow-50"
 };
 
+function buildMonthSummary(month: string, days: CalendarDay[]) {
+  let totalAssignments = 0;
+  let nightAssignments = 0;
+  let weekendAssignments = 0;
+  let holidayAssignments = 0;
+  let conflictCount = 0;
+  let unfilledAssignments = 0;
+  for (const day of days) {
+    const isWeekend = day.dateType === "WEEKEND" || day.weekdayLabel === "周六" || day.weekdayLabel === "周日";
+    const isHoliday = day.dateType === "HOLIDAY" || day.dateType === "PUBLIC_HOLIDAY" || day.dateType === "CUSTOM_REST_DAY" || day.dateType === "CUSTOM_REST";
+    conflictCount += day.conflicts.length;
+    for (const cell of day.cells) {
+      const assigned = cell.assignments.length;
+      totalAssignments += assigned;
+      unfilledAssignments += Math.max(0, cell.requiredDoctors - assigned);
+      if (cell.label.includes("夜") || cell.timeSlotLabel.includes("夜")) nightAssignments += assigned;
+      if (isWeekend) weekendAssignments += assigned;
+      if (isHoliday) holidayAssignments += assigned;
+    }
+  }
+  return { month, totalAssignments, nightAssignments, weekendAssignments, holidayAssignments, conflictCount, unfilledAssignments };
+}
+
 export function SchedulePreviewClient({ taskId }: { taskId: string }) {
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [busy, setBusy] = useState("");
@@ -109,15 +135,30 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
     }
     return Array.from(groups.entries());
   }, [preview]);
+  const useMonthOverview = useMemo(
+    () => ["QUARTER", "HALF_YEAR", "YEAR"].includes(preview?.task.periodType ?? ""),
+    [preview?.task.periodType]
+  );
+  const monthSummaries = useMemo(() => monthGroups.map(([month, days]) => buildMonthSummary(month, days)), [monthGroups]);
 
   useEffect(() => {
     if (!monthGroups.length) return;
+    if (useMonthOverview) {
+      if (activeMonth && !monthGroups.some(([month]) => month === activeMonth)) setActiveMonth("");
+      return;
+    }
     if (!activeMonth || !monthGroups.some(([month]) => month === activeMonth)) {
       setActiveMonth(monthGroups[0][0]);
     }
-  }, [activeMonth, monthGroups]);
+  }, [activeMonth, monthGroups, useMonthOverview]);
 
-  const visibleMonthGroups = monthGroups.length > 2 && activeMonth ? monthGroups.filter(([month]) => month === activeMonth) : monthGroups;
+  const visibleMonthGroups = useMonthOverview
+    ? activeMonth
+      ? monthGroups.filter(([month]) => month === activeMonth)
+      : []
+    : monthGroups.length > 2 && activeMonth
+      ? monthGroups.filter(([month]) => month === activeMonth)
+      : monthGroups;
 
   function openEdit(cell: Cell) {
     setEditingCell(cell);
@@ -264,7 +305,43 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
           </div>
 
           <div className="space-y-8">
-            {monthGroups.length > 2 ? (
+            {useMonthOverview && !activeMonth ? (
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-950">月份总览</h3>
+                  <p className="mt-1 text-sm text-slate-500">长期周期先按月份查看概览，点击月份后进入该月日历明细。</p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {monthSummaries.map((summary) => (
+                    <button
+                      type="button"
+                      key={summary.month}
+                      onClick={() => setActiveMonth(summary.month)}
+                      className="focus-ring rounded-lg border border-slate-200 bg-white p-4 text-left shadow-table hover:border-hospital-green"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-lg font-semibold text-slate-950">{summary.month}</div>
+                        {summary.conflictCount || summary.unfilledAssignments ? (
+                          <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">需处理</span>
+                        ) : (
+                          <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs text-hospital-green">正常</span>
+                        )}
+                      </div>
+                      <dl className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">总班次数</dt><dd className="font-semibold text-slate-950">{summary.totalAssignments}</dd></div>
+                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">夜班数</dt><dd className="font-semibold text-slate-950">{summary.nightAssignments}</dd></div>
+                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">周末班</dt><dd className="font-semibold text-slate-950">{summary.weekendAssignments}</dd></div>
+                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">节假日班</dt><dd className="font-semibold text-slate-950">{summary.holidayAssignments}</dd></div>
+                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">冲突数</dt><dd className={summary.conflictCount ? "font-semibold text-red-700" : "font-semibold text-slate-950"}>{summary.conflictCount}</dd></div>
+                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">未排满</dt><dd className={summary.unfilledAssignments ? "font-semibold text-red-700" : "font-semibold text-slate-950"}>{summary.unfilledAssignments}</dd></div>
+                      </dl>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {!useMonthOverview && monthGroups.length > 2 ? (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
                 <span className="text-sm font-medium text-slate-700">按月查看</span>
                 <select value={activeMonth} onChange={(event) => setActiveMonth(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm">
@@ -276,7 +353,12 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
             {visibleMonthGroups.map(([month, days]) => (
               <div key={month} className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-slate-950">{month}</h3>
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-semibold text-slate-950">{month}</h3>
+                    {useMonthOverview ? (
+                      <button type="button" onClick={() => setActiveMonth("")} className="text-sm font-medium text-slate-600 hover:text-slate-950">返回月份总览</button>
+                    ) : null}
+                  </div>
                   <span className="text-sm text-slate-500">{TASK_SCHEDULE_MODE_LABELS[preview.task.scheduleMode]}</span>
                 </div>
                 <div className="grid gap-3 md:grid-cols-7">

@@ -20,8 +20,8 @@ import type { getTaskDetail } from "@/lib/tasks";
 type TaskDetail = NonNullable<Awaited<ReturnType<typeof getTaskDetail>>>;
 
 const DOCTOR_TYPE_LABEL: Record<DoctorTypeValue, string> = {
-  RESIDENT: "A组",
-  INTERN: "B组"
+  RESIDENT: "固定",
+  INTERN: "轮转"
 };
 
 function doctorNamesForCell(task: TaskDetail, dateKey: string, timeSlot: TimeSlotValue, roomNumber: number) {

@@ -3,7 +3,7 @@ import { authErrorResponse, requireUser } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { dateFromKey } from "@/lib/date-utils";
 import { prisma } from "@/lib/prisma";
-import { evaluateFeedbackStatus, JOIN_REVIEW_STATUS, normalizeTimeSlot } from "@/lib/roster-workflow";
+import { evaluateFeedbackStatus, JOIN_REVIEW_STATUS, ROSTER_STATUS, normalizeTimeSlot } from "@/lib/roster-workflow";
 
 export const runtime = "nodejs";
 
@@ -42,10 +42,20 @@ export async function POST(request: Request) {
     const message = String(body.message ?? "").trim();
     const title = String(body.title ?? "").trim() || "成员排班反馈";
     const periodDays = await getPeriodDays(claim.scheduleTaskId);
+    const rosterEntry = claim.rosterEntryId
+      ? await prisma.rosterEntry.findUnique({
+          where: { id: claim.rosterEntryId },
+          select: { status: true, includeInScheduling: true }
+        })
+      : null;
+    const identityConfirmed =
+      claim.reviewStatus === JOIN_REVIEW_STATUS.APPROVED &&
+      rosterEntry?.status === ROSTER_STATUS.CONFIRMED &&
+      rosterEntry.includeInScheduling;
     const decision = evaluateFeedbackStatus({
       unavailableCount: records.length,
       periodDays,
-      identityConfirmed: claim.reviewStatus === JOIN_REVIEW_STATUS.APPROVED,
+      identityConfirmed,
       hasMessage: Boolean(message)
     });
     const feedback = await prisma.memberFeedback.create({
