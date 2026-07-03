@@ -3,8 +3,8 @@
 import { CalendarDays, ExternalLink, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { MODE_LABELS, STATUS_LABELS, TASK_SCHEDULE_MODE_LABELS } from "@/lib/schedule-rules";
-import { toDateKey } from "@/lib/date-utils";
+import { MODE_LABELS, PERIOD_TYPE_LABELS, STATUS_LABELS, TASK_SCHEDULE_MODE_LABELS } from "@/lib/schedule-rules";
+import { getDateRangeDayCount, toDateKey } from "@/lib/date-utils";
 import type { ApiTaskListItem } from "@/components/schedule-types";
 
 const PAGE_SIZE = 30;
@@ -112,10 +112,12 @@ export function TaskList() {
 
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
         <div className="table-scroll">
-          <table className="min-w-[860px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[1040px] w-full border-collapse text-left text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
-                <th className="border-b border-slate-200 px-4 py-3 font-medium">排班周期</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">任务名称</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">日期范围</th>
+                <th className="border-b border-slate-200 px-4 py-3 font-medium">周期</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">病区/小组</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">排班模式</th>
                 <th className="border-b border-slate-200 px-4 py-3 font-medium">时段</th>
@@ -130,25 +132,31 @@ export function TaskList() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-slate-500" colSpan={10}>
+                  <td className="px-4 py-8 text-center text-slate-500" colSpan={12}>
                     正在加载任务...
                   </td>
                 </tr>
               ) : tasks.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-8 text-center text-slate-500" colSpan={10}>
+                  <td className="px-4 py-8 text-center text-slate-500" colSpan={12}>
                     暂无排班任务
                   </td>
                 </tr>
               ) : (
-                tasks.map((task) => (
+                tasks.map((task) => {
+                  const start = toDateKey(task.startDate ?? task.weekStartDate);
+                  const end = toDateKey(task.endDate ?? task.weekEndDate);
+                  const days = getDateRangeDayCount(start, end);
+                  return (
                   <tr key={task.id} className="hover:bg-slate-50">
+                    <td className="border-b border-slate-100 px-4 py-3 font-medium text-slate-900">{task.name || "排班任务"}</td>
                     <td className="border-b border-slate-100 px-4 py-3">
                       <div className="flex items-center gap-2 font-medium text-slate-900">
                         <CalendarDays size={16} className="text-hospital-green" />
-                        {toDateKey(task.weekStartDate)} 至 {toDateKey(task.weekEndDate)}
+                        {start} 至 {end}
                       </div>
                     </td>
+                    <td className="border-b border-slate-100 px-4 py-3">{PERIOD_TYPE_LABELS[task.periodType] ?? "7 天"} · {days} 天</td>
                     <td className="border-b border-slate-100 px-4 py-3 text-slate-600">{task.unit?.name ?? task.department?.name ?? "-"}</td>
                     <td className="border-b border-slate-100 px-4 py-3">{TASK_SCHEDULE_MODE_LABELS[task.scheduleMode]}</td>
                     <td className="border-b border-slate-100 px-4 py-3">{task.scheduleMode === "MEDTECH_ROOM" ? MODE_LABELS[task.mode] : "按班次"}</td>
@@ -188,7 +196,8 @@ export function TaskList() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

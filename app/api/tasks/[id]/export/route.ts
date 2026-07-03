@@ -17,9 +17,9 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
     const workbook = await createScheduleWorkbook(task);
     const buffer = await workbook.xlsx.writeBuffer();
-    const start = toDateKey(task.weekStartDate);
-    const end = toDateKey(task.weekEndDate);
-    const filename = `公平排班表_${start}至${end}.xlsx`;
+    const start = toDateKey((task as any).startDate ?? task.weekStartDate);
+    const end = toDateKey((task as any).endDate ?? task.weekEndDate);
+    const filename = `公平排班_${start}至${end}.xlsx`;
 
     await writeAuditLog({
       actorUserId: user.id,

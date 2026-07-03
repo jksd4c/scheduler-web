@@ -15,7 +15,7 @@ export default async function GuestSchedulePage() {
       departmentId: guest.departmentId,
       status: { in: ["GENERATED", "PUBLISHED", "LOCKED"] }
     },
-    orderBy: { weekStartDate: "desc" },
+    orderBy: { startDate: "desc" },
     include: {
       assignments: {
         include: { doctor: true },
@@ -52,7 +52,7 @@ export default async function GuestSchedulePage() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h3 className="text-lg font-semibold text-slate-950">
-                    {toDateKey(task.weekStartDate)} 至 {toDateKey(task.weekEndDate)}
+                    {toDateKey((task as any).startDate ?? task.weekStartDate)} 至 {toDateKey((task as any).endDate ?? task.weekEndDate)}
                   </h3>
                   <p className="text-sm text-slate-600">{MODE_LABELS[asScheduleMode(task.mode)]}</p>
                 </div>

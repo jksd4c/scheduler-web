@@ -3,7 +3,7 @@
 import { Ban, Copy, History, Link2, Loader2, Plus, RefreshCw, Save, ShieldCheck, UserCheck, UserX } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 
-type TaskOption = { id: string; weekStartDate: string; weekEndDate: string; unit?: { name: string } | null };
+type TaskOption = { id: string; name?: string | null; startDate?: string; endDate?: string; weekStartDate: string; weekEndDate: string; unit?: { name: string } | null };
 type Pool = { id: string; name: string; poolType: string; active: boolean; startDate?: string | null; endDate?: string | null };
 type RosterEntry = {
   id: string;
@@ -71,6 +71,12 @@ const statusLabels: Record<string, string> = {
   NEEDS_REVIEW: "待审核",
   REJECTED_FEEDBACK: "已驳回"
 };
+
+function taskOptionLabel(task: TaskOption) {
+  const start = new Date(task.startDate ?? task.weekStartDate).toISOString().slice(0, 10);
+  const end = new Date(task.endDate ?? task.weekEndDate).toISOString().slice(0, 10);
+  return `${task.name || "排班任务"}：${start} 至 ${end}`;
+}
 
 export function StaffPoolsClient() {
   const [pools, setPools] = useState<Pool[]>([]);
@@ -180,7 +186,7 @@ export function RosterClient() {
           <div className="mt-4 space-y-3">
             <select className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={scheduleTaskId} onChange={(event) => setScheduleTaskId(event.target.value)}>
               <option value="">不绑定任务</option>
-              {tasks.map((task) => <option key={task.id} value={task.id}>{new Date(task.weekStartDate).toISOString().slice(0, 10)} 至 {new Date(task.weekEndDate).toISOString().slice(0, 10)}</option>)}
+              {tasks.map((task) => <option key={task.id} value={task.id}>{taskOptionLabel(task)}</option>)}
             </select>
             <select className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={staffPoolId} onChange={(event) => setStaffPoolId(event.target.value)}>
               <option value="">不绑定人员池</option>
@@ -336,7 +342,7 @@ export function JoinCodesClient() {
         <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
           <select value={scheduleTaskId} onChange={(event) => setScheduleTaskId(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm">
             <option value="">不绑定任务</option>
-            {tasks.map((task) => <option key={task.id} value={task.id}>{new Date(task.weekStartDate).toISOString().slice(0, 10)} 至 {new Date(task.weekEndDate).toISOString().slice(0, 10)}</option>)}
+            {tasks.map((task) => <option key={task.id} value={task.id}>{taskOptionLabel(task)}</option>)}
           </select>
           <select value={staffPoolId} onChange={(event) => setStaffPoolId(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm">
             <option value="">不绑定人员池</option>

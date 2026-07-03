@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
+import { getDateRangeDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
 import {
   MODE_LABELS,
   SLOT_LABELS,
@@ -61,6 +61,7 @@ export async function createScheduleWorkbook(task: TaskDetail) {
   workbook.created = new Date();
 
   const requirementCells = requirementsToCells(task.requirements);
+  const rangeDays = getDateRangeDates((task as any).startDate ?? task.weekStartDate, (task as any).endDate ?? task.weekEndDate);
   const taskScheduleMode = asTaskScheduleMode((task as any).scheduleMode);
   if (taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM) {
     const maxRoomNumber = Math.max(1, getMaxRoomNumberFromRequirements(task.requirements));
@@ -81,7 +82,7 @@ export async function createScheduleWorkbook(task: TaskDetail) {
             ...roomHeaders.map((header, index) => ({ header, key: `room${index + 1}`, width: 26 }))
           ];
 
-    for (const day of getWeekDates(task.weekStartDate)) {
+    for (const day of rangeDays) {
       for (const timeSlot of getTimeSlotsForMode(asScheduleMode(task.mode))) {
         const row: Record<string, string> = {
           date: day.dateKey,
@@ -115,7 +116,7 @@ export async function createScheduleWorkbook(task: TaskDetail) {
       { header: "\u661f\u671f", key: "weekday", width: 10 },
       ...shiftColumns.map((requirement, index) => ({ header: requirementLabel(requirement, task.scheduleMode), key: `shift${index + 1}`, width: 28 }))
     ];
-    for (const day of getWeekDates(task.weekStartDate)) {
+    for (const day of rangeDays) {
       const row: Record<string, string> = { date: day.dateKey, weekday: day.label };
       shiftColumns.forEach((column, index) => {
         const requirement = requirementCells.find((item) => item.dateKey === day.dateKey && item.shiftTypeId === column.shiftTypeId);
@@ -148,6 +149,10 @@ export async function createScheduleWorkbook(task: TaskDetail) {
     { header: "\u4e0a\u5348\u73ed\u6b21\u6570", key: "morningAssignments", width: 12 },
     { header: "\u4e0b\u5348\u73ed\u6b21\u6570", key: "afternoonAssignments", width: 12 },
     { header: "\u5468\u672b\u73ed\u6b21\u6570", key: "weekendAssignments", width: 12 },
+    { header: "节假日班", key: "holidayAssignments", width: 12 },
+    { header: "调休上班日", key: "makeupWorkdayAssignments", width: 12 },
+    { header: "周末夜班", key: "weekendNightAssignments", width: 12 },
+    { header: "节假日夜班", key: "holidayNightAssignments", width: 12 },
     { header: "\u5468\u4e00\u5468\u4e8c\u9ad8\u5cf0\u73ed", key: "peakAssignments", width: 16 },
     { header: "\u6700\u957f\u8fde\u7eed\u4e0a\u73ed\u5929\u6570", key: "maxConsecutiveDays", width: 18 },
     { header: "\u4e0d\u53ef\u7528\u51b2\u7a81\u6570", key: "unavailableConflictCount", width: 14 },

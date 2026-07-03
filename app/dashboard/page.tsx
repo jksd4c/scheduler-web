@@ -4,7 +4,7 @@ import { AccessCodeManager } from "@/components/access-code-manager";
 import { TaskList } from "@/components/task-list";
 import { isSchedulerAdminRole, requirePageUser, USER_ROLE } from "@/lib/auth";
 import { PRODUCT_VERSION_LABEL } from "@/lib/product";
-import { ClipboardCheck, KeyRound, Tags, Timer, UserCheck, UsersRound } from "lucide-react";
+import { CalendarDays, ClipboardCheck, KeyRound, Tags, Timer, UserCheck, UsersRound } from "lucide-react";
 
 export default async function DashboardPage() {
   const user = await requirePageUser();
@@ -47,6 +47,15 @@ export default async function DashboardPage() {
             <div>
               <div className="font-semibold text-slate-950">班次身份要求</div>
               <div className="mt-1 text-xs text-slate-500">REQUIRED / FORBIDDEN / ALLOWED</div>
+            </div>
+          </div>
+        </Link>
+        <Link href="/dashboard/special-dates" className="focus-ring rounded-lg border border-slate-200 bg-white p-4 shadow-table hover:border-hospital-green">
+          <div className="flex items-center gap-3">
+            <CalendarDays className="text-hospital-green" size={22} />
+            <div>
+              <div className="font-semibold text-slate-950">特殊日期</div>
+              <div className="mt-1 text-xs text-slate-500">节假日、调休上班日和自定义特殊日</div>
             </div>
           </div>
         </Link>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
-import { dateFromKey, getWeekDates } from "@/lib/date-utils";
+import { dateFromKey, getDateRangeDates } from "@/lib/date-utils";
 import { prisma } from "@/lib/prisma";
 import { SCHEDULE_STATUS, TIME_SLOT, type TimeSlotValue } from "@/lib/schedule-rules";
 import { getTaskDetail } from "@/lib/tasks";
@@ -31,8 +31,8 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     }
 
     const doctorIds = new Set(task.doctors.map((doctor) => doctor.id));
-    const weekDays = getWeekDates(task.weekStartDate);
-    const weekdayByDate = new Map(weekDays.map((day) => [day.dateKey, day.weekday]));
+    const rangeDays = getDateRangeDates((task as any).startDate ?? task.weekStartDate, (task as any).endDate ?? task.weekEndDate);
+    const weekdayByDate = new Map(rangeDays.map((day) => [day.dateKey, day.weekday]));
     const dedupe = new Set<string>();
     const data: Array<{
       departmentId: string;

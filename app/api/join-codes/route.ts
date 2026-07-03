@@ -46,7 +46,7 @@ export async function GET(request: Request) {
       }),
       prisma.scheduleTask.findMany({
         where: { id: { in: unique(codes.map((item) => item.scheduleTaskId).filter(Boolean) as string[]) } },
-        select: { id: true, weekStartDate: true, weekEndDate: true, scheduleMode: true }
+        select: { id: true, name: true, startDate: true, endDate: true, weekStartDate: true, weekEndDate: true, scheduleMode: true }
       }),
       prisma.staffPool.findMany({
         where: { id: { in: unique(codes.map((item) => item.staffPoolId).filter(Boolean) as string[]) } },
@@ -95,7 +95,7 @@ export async function GET(request: Request) {
           departmentName: departmentMap.get(code.departmentId) ?? "-",
           unitName: unitMap.get(code.unitId) ?? "-",
           scheduleTaskId: code.scheduleTaskId,
-          scheduleTaskLabel: task ? `${formatDate(task.weekStartDate)} 至 ${formatDate(task.weekEndDate)}` : null,
+          scheduleTaskLabel: task ? `${task.name || "排班任务"}：${formatDate((task as any).startDate ?? task.weekStartDate)} 至 ${formatDate((task as any).endDate ?? task.weekEndDate)}` : null,
           staffPoolId: code.staffPoolId,
           staffPoolLabel: pool ? pool.name : null,
           codeValue: decrypted.value,

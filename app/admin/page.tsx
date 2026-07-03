@@ -94,7 +94,7 @@ export default async function AdminPage() {
           empty="暂无任务"
           items={recentTasks.map((item) => ({
             id: item.id,
-            primary: `${item.weekStartDate.toISOString().slice(0, 10)} 至 ${item.weekEndDate.toISOString().slice(0, 10)}`,
+            primary: `${item.name || "排班任务"}：${(item.startDate ?? item.weekStartDate).toISOString().slice(0, 10)} 至 ${(item.endDate ?? item.weekEndDate).toISOString().slice(0, 10)}`,
             secondary: [item.hospital?.name, item.department?.name, item.unit?.name, item.status].filter(Boolean).join(" / ")
           }))}
         />

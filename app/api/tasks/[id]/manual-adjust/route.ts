@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse, requireScheduleTaskAccess } from "@/lib/auth";
 import { isDoctorUnavailable } from "@/lib/availability";
-import { dateFromKey, getWeekDates, toDateKey } from "@/lib/date-utils";
+import { dateFromKey, getDateRangeDates, toDateKey } from "@/lib/date-utils";
 import { prisma } from "@/lib/prisma";
 import { rebuildConflictsForTask } from "@/lib/scheduler";
 import { SCHEDULE_STATUS, TIME_SLOT, asTimeSlot, type TimeSlotValue } from "@/lib/schedule-rules";
@@ -73,10 +73,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
       return NextResponse.json({ message: "半天班模式只能调整上午或下午" }, { status: 400 });
     }
 
-    const weekday = existingAssignment ? existingAssignment.weekday : getWeekDates(task.weekStartDate).find((day) => day.dateKey === dateKey)?.weekday;
+    const weekday = existingAssignment
+      ? existingAssignment.weekday
+      : getDateRangeDates((task as any).startDate ?? task.weekStartDate, (task as any).endDate ?? task.weekEndDate).find((day) => day.dateKey === dateKey)?.weekday;
 
     if (!weekday) {
-      return NextResponse.json({ message: "日期不在本次排班周范围内" }, { status: 400 });
+      return NextResponse.json({ message: "日期不在本次排班日期范围内" }, { status: 400 });
     }
 
     const requirement = task.requirements.find(

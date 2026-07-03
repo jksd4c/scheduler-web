@@ -4,10 +4,11 @@ import { ArrowLeft, Building2, CalendarPlus, CheckCircle2, Columns3, Moon, Slide
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getNextMonday, getWeekEndDateKey } from "@/lib/date-utils";
-import { MODE_LABELS, TASK_SCHEDULE_MODE_LABELS } from "@/lib/schedule-rules";
+import { getDateRangeDayCount, getPeriodRange, getTodayDateKey } from "@/lib/date-utils";
+import { MODE_LABELS, PERIOD_TYPE_LABELS, TASK_SCHEDULE_MODE_LABELS } from "@/lib/schedule-rules";
 import { mergeDoctorNameLists } from "@/lib/name-parser";
 import type { ScheduleMode, TaskScheduleMode } from "@/components/schedule-types";
+import type { PeriodType } from "@/lib/date-utils";
 
 type StaffOption = {
   id: string;
@@ -20,8 +21,15 @@ type StaffOption = {
 export function NewTaskForm() {
   const router = useRouter();
   const [step, setStep] = useState<"choose" | "form">("choose");
+  const todayKey = getTodayDateKey();
   const [scheduleMode, setScheduleMode] = useState<TaskScheduleMode>("WARD_SHIFT");
-  const [weekStartDate, setWeekStartDate] = useState(getNextMonday());
+  const [name, setName] = useState("排班任务");
+  const [periodType, setPeriodType] = useState<PeriodType>("DAYS_30");
+  const [startDate, setStartDate] = useState(todayKey);
+  const [endDate, setEndDate] = useState(getPeriodRange("DAYS_30", todayKey).endDate);
+  const [periodYear, setPeriodYear] = useState(Number(todayKey.slice(0, 4)));
+  const [periodMonth, setPeriodMonth] = useState(Number(todayKey.slice(5, 7)));
+  const [periodQuarter, setPeriodQuarter] = useState(Math.floor((Number(todayKey.slice(5, 7)) - 1) / 3) + 1);
   const [mode, setMode] = useState<ScheduleMode>("FULL_DAY");
   const [residentNames, setResidentNames] = useState("");
   const [internNames, setInternNames] = useState("");
@@ -33,6 +41,7 @@ export function NewTaskForm() {
   const parsed = useMemo(() => mergeDoctorNameLists(residentNames, internNames), [residentNames, internNames]);
   const totalDoctors = parsed.residents.length + parsed.interns.length + selectedStaffIds.length;
   const taskMode = scheduleMode === "MEDTECH_ROOM" ? mode : "FULL_DAY";
+  const periodDays = getDateRangeDayCount(startDate, endDate);
 
   useEffect(() => {
     fetch("/api/staff")
@@ -41,6 +50,27 @@ export function NewTaskForm() {
       .catch(() => setStaffOptions([]));
   }, []);
 
+  useEffect(() => {
+    if (periodType === "CUSTOM") {
+      if (endDate < startDate) setEndDate(startDate);
+      return;
+    }
+    const range = getPeriodRange(periodType, startDate, { year: periodYear, month: periodMonth, quarter: periodQuarter });
+    setStartDate(range.startDate);
+    setEndDate(range.endDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodType, periodYear, periodMonth, periodQuarter]);
+
+  function updateStartDate(value: string) {
+    setStartDate(value);
+    if (periodType === "DAYS_7" || periodType === "DAYS_30") {
+      const range = getPeriodRange(periodType, value);
+      setEndDate(range.endDate);
+    } else if (periodType === "CUSTOM" && endDate < value) {
+      setEndDate(value);
+    }
+  }
+
   async function submit() {
     setSubmitting(true);
     setError("");
@@ -48,7 +78,7 @@ export function NewTaskForm() {
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ weekStartDate, mode: taskMode, scheduleMode, residentNames, internNames, staffProfileIds: selectedStaffIds })
+        body: JSON.stringify({ name, periodType, startDate, endDate, mode: taskMode, scheduleMode, residentNames, internNames, staffProfileIds: selectedStaffIds })
       });
       const data = await response.json();
       if (!response.ok) {
@@ -155,7 +185,7 @@ export function NewTaskForm() {
             返回任务列表
           </Link>
           <h2 className="mt-3 text-2xl font-semibold text-slate-950">新建排班任务</h2>
-          <p className="mt-1 text-sm text-slate-600">当前模式：{TASK_SCHEDULE_MODE_LABELS[scheduleMode]}。输入本次参与排班的人员名单，可按 A/B 分组便于显示和统计。</p>
+          <p className="mt-1 text-sm text-slate-600">当前模式：{TASK_SCHEDULE_MODE_LABELS[scheduleMode]}。默认 30 天周期，可切换 7 天、自然月、季度、年度或自定义日期范围。</p>
         </div>
         <button type="button" onClick={() => setStep("choose")} className="focus-ring inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
           <Building2 size={16} />
@@ -167,14 +197,79 @@ export function NewTaskForm() {
         <div className="space-y-5 rounded-lg border border-slate-200 bg-white p-5 shadow-table">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
-              <span className="text-sm font-medium text-slate-700">排班周开始日期</span>
+              <span className="text-sm font-medium text-slate-700">任务名称</span>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                placeholder="例如 8月病区排班"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">排班周期</span>
+              <select
+                value={periodType}
+                onChange={(event) => setPeriodType(event.target.value as PeriodType)}
+                className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              >
+                {(["DAYS_7", "DAYS_30", "CALENDAR_MONTH", "QUARTER", "YEAR", "CUSTOM"] as PeriodType[]).map((item) => (
+                  <option key={item} value={item}>{PERIOD_TYPE_LABELS[item]}{item === "DAYS_30" ? "（默认）" : ""}</option>
+                ))}
+              </select>
+            </label>
+
+            {periodType === "CALENDAR_MONTH" || periodType === "QUARTER" || periodType === "YEAR" ? (
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">年份</span>
+                <input
+                  type="number"
+                  value={periodYear}
+                  onChange={(event) => setPeriodYear(Number(event.target.value))}
+                  className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                />
+              </label>
+            ) : null}
+
+            {periodType === "CALENDAR_MONTH" ? (
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">月份</span>
+                <select value={periodMonth} onChange={(event) => setPeriodMonth(Number(event.target.value))} className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
+                  {Array.from({ length: 12 }).map((_, index) => <option key={index + 1} value={index + 1}>{index + 1} 月</option>)}
+                </select>
+              </label>
+            ) : null}
+
+            {periodType === "QUARTER" ? (
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">季度</span>
+                <select value={periodQuarter} onChange={(event) => setPeriodQuarter(Number(event.target.value))} className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2">
+                  {[1, 2, 3, 4].map((quarter) => <option key={quarter} value={quarter}>Q{quarter}</option>)}
+                </select>
+              </label>
+            ) : null}
+
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">开始日期</span>
               <input
                 type="date"
-                value={weekStartDate}
-                onChange={(event) => setWeekStartDate(event.target.value)}
-                className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                value={startDate}
+                disabled={periodType === "CALENDAR_MONTH" || periodType === "QUARTER" || periodType === "YEAR"}
+                onChange={(event) => updateStartDate(event.target.value)}
+                className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100"
               />
-              <span className="mt-1 block text-xs text-slate-500">本周范围：{weekStartDate} 至 {getWeekEndDateKey(weekStartDate)}</span>
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-slate-700">结束日期</span>
+              <input
+                type="date"
+                value={endDate}
+                disabled={periodType !== "CUSTOM"}
+                onChange={(event) => setEndDate(event.target.value)}
+                className="focus-ring mt-1 w-full rounded-md border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              />
+              <span className={periodDays > 366 || endDate < startDate ? "mt-1 block text-xs text-red-600" : "mt-1 block text-xs text-slate-500"}>
+                日期范围：{startDate} 至 {endDate}，共 {periodDays} 天
+              </span>
             </label>
 
             {scheduleMode === "MEDTECH_ROOM" ? (
@@ -280,7 +375,7 @@ export function NewTaskForm() {
           <div className="flex justify-end">
             <button
               onClick={() => void submit()}
-              disabled={submitting || totalDoctors === 0}
+              disabled={submitting || totalDoctors === 0 || endDate < startDate || periodDays > 366 || !name.trim()}
               className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <CalendarPlus size={16} />

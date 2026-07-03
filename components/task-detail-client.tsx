@@ -20,9 +20,10 @@ import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
+import { getDateRangeDates, getDateRangeDayCount, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
 import {
   MODE_LABELS,
+  PERIOD_TYPE_LABELS,
   SLOT_LABELS,
   STATUS_LABELS,
   TASK_SCHEDULE_MODE_LABELS,
@@ -88,7 +89,7 @@ function buildUnavailableDraft(task: ApiTaskDetail) {
   const notes: Record<string, string> = {};
   for (const doctor of task.doctors) {
     draft[doctor.id] = {};
-    for (const day of getWeekDates(task.weekStartDate)) {
+    for (const day of getTaskDateRange(task)) {
       draft[doctor.id][day.dateKey] = { morning: false, afternoon: false };
     }
   }
@@ -109,7 +110,7 @@ function buildUnavailableDraft(task: ApiTaskDetail) {
 
 function buildRequirementDraft(task: ApiTaskDetail): RequirementDraft {
   const draft: RequirementDraft = {};
-  for (const day of getWeekDates(task.weekStartDate)) {
+  for (const day of getTaskDateRange(task)) {
     draft[day.dateKey] = {
       fullDay: createClosedSlot(),
       morning: createClosedSlot(),
@@ -136,7 +137,7 @@ function buildRequirementDraft(task: ApiTaskDetail): RequirementDraft {
 
 function buildShiftRequirementDraft(task: ApiTaskDetail, shiftTypes: ShiftTypeOption[]): ShiftRequirementDraft {
   const draft: ShiftRequirementDraft = {};
-  for (const day of getWeekDates(task.weekStartDate)) {
+  for (const day of getTaskDateRange(task)) {
     draft[day.dateKey] = {};
     for (const shiftType of shiftTypes) {
       draft[day.dateKey][shiftType.id] = 0;
@@ -160,7 +161,7 @@ function expandRequirementDraft(task: ApiTaskDetail, draft: RequirementDraft) {
     roomNumber: number;
     requiredDoctors: number;
   }> = [];
-  for (const day of getWeekDates(task.weekStartDate)) {
+  for (const day of getTaskDateRange(task)) {
     const value = draft[day.dateKey];
     if (!value) continue;
     const slots =
@@ -191,7 +192,7 @@ function expandRequirementDraft(task: ApiTaskDetail, draft: RequirementDraft) {
 
 function expandShiftRequirementDraft(task: ApiTaskDetail, draft: ShiftRequirementDraft, shiftTypes: ShiftTypeOption[]) {
   const activeShiftTypes = shiftTypes.filter((item) => item.active);
-  return getWeekDates(task.weekStartDate).flatMap((day) =>
+  return getTaskDateRange(task).flatMap((day) =>
     activeShiftTypes
       .map((shiftType, index) => {
         const requiredDoctors = clampRoomCount(Number(draft[day.dateKey]?.[shiftType.id] ?? 0));
@@ -226,10 +227,23 @@ function currentTaskMode(value: unknown): TaskScheduleMode {
   return value === TASK_SCHEDULE_MODE.WARD_SHIFT || value === TASK_SCHEDULE_MODE.CUSTOM ? value : TASK_SCHEDULE_MODE.MEDTECH_ROOM;
 }
 
+function getTaskStartDate(task: ApiTaskDetail) {
+  return task.startDate ?? task.weekStartDate;
+}
+
+function getTaskEndDate(task: ApiTaskDetail) {
+  return task.endDate ?? task.weekEndDate;
+}
+
+function getTaskDateRange(task: ApiTaskDetail) {
+  return getDateRangeDates(getTaskStartDate(task), getTaskEndDate(task));
+}
+
 export function TaskDetailClient({ taskId }: { taskId: string }) {
   const [task, setTask] = useState<ApiTaskDetail | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("requirements");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [activeRulesMonth, setActiveRulesMonth] = useState("");
   const [scheduleView, setScheduleView] = useState<ScheduleView>("room");
   const [busy, setBusy] = useState<BusyState>("load");
   const [error, setError] = useState("");
@@ -275,10 +289,22 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     setNoteDraft(notes);
   }, [task, shiftTypes]);
 
-  const weekDays = useMemo(() => (task ? getWeekDates(task.weekStartDate) : []), [task]);
+  const weekDays = useMemo(() => (task ? getTaskDateRange(task) : []), [task]);
+  const ruleMonthOptions = useMemo(() => Array.from(new Set(weekDays.map((day) => day.monthKey))), [weekDays]);
+  const visibleWeekDays = useMemo(
+    () => (ruleMonthOptions.length > 2 && activeRulesMonth ? weekDays.filter((day) => day.monthKey === activeRulesMonth) : weekDays),
+    [activeRulesMonth, ruleMonthOptions.length, weekDays]
+  );
   const requirementCells = useMemo(() => (task ? requirementsToCells(task.requirements) : []), [task]);
   const activeShiftTypes = useMemo(() => shiftTypes.filter((item) => item.active), [shiftTypes]);
   const taskScheduleMode = currentTaskMode(task?.scheduleMode);
+
+  useEffect(() => {
+    if (!ruleMonthOptions.length) return;
+    if (!activeRulesMonth || !ruleMonthOptions.includes(activeRulesMonth)) {
+      setActiveRulesMonth(ruleMonthOptions[0]);
+    }
+  }, [activeRulesMonth, ruleMonthOptions]);
 
   function assignmentsFor(dateKey: string, timeSlot: TimeSlot, roomNumber: number) {
     return (
@@ -493,7 +519,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `fair-schedule_${toDateKey(task.weekStartDate)}_to_${toDateKey(task.weekEndDate)}.xlsx`;
+      link.download = `公平排班_${toDateKey(getTaskStartDate(task))}至${toDateKey(getTaskEndDate(task))}.xlsx`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -560,6 +586,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
 
   function renderWizard() {
     const hasRequirements = stats.overall.expectedAssignments > 0;
+    const rangeDays = getDateRangeDayCount(getTaskStartDate(currentTask), getTaskEndDate(currentTask));
     const hasPreview = currentTask.assignments.length > 0 || currentTask.status === "PREVIEW" || currentTask.status === "GENERATED";
     const hasFeedback = currentTask.unavailableTimes.length > 0;
     const hasIdentitySnapshot = currentTask.doctors.some((doctor) => {
@@ -665,7 +692,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             </p>
           </div>
           <div className="text-sm text-slate-600">
-            当前模式：<span className="font-medium text-slate-900">{TASK_SCHEDULE_MODE_LABELS[taskScheduleMode]}</span>
+              当前模式：<span className="font-medium text-slate-900">{TASK_SCHEDULE_MODE_LABELS[taskScheduleMode]}</span>
+              <span className="mx-2 text-slate-300">/</span>
+              <span className="font-medium text-slate-900">{PERIOD_TYPE_LABELS[currentTask.periodType] ?? "日期范围"} · {rangeDays} 天</span>
           </div>
         </div>
 
@@ -877,7 +906,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 </tr>
               </thead>
               <tbody>
-                {weekDays.map((day) => (
+                {visibleWeekDays.map((day) => (
                   <tr key={day.dateKey}>
                     <td className="border-b border-slate-100 px-3 py-3 font-medium text-slate-900">{day.label}</td>
                     <td className="border-b border-slate-100 px-3 py-3 text-slate-600">{day.dateKey}</td>
@@ -1013,7 +1042,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 </tr>
               </thead>
               <tbody>
-                {weekDays.map((day) => (
+                {visibleWeekDays.map((day) => (
                   <tr key={day.dateKey}>
                     <td className="border-b border-slate-100 px-3 py-3 font-medium text-slate-900">{day.label}</td>
                     <td className="border-b border-slate-100 px-3 py-3 text-slate-600">{day.dateKey}</td>
@@ -1128,7 +1157,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
               </tr>
             </thead>
             <tbody>
-              {weekDays.map((day) => (
+              {visibleWeekDays.map((day) => (
                 <tr key={day.dateKey} className="align-top">
                   <td className="border-b border-slate-100 px-3 py-3 font-medium text-slate-900">{day.dateKey}</td>
                   <td className="border-b border-slate-100 px-3 py-3 text-slate-600">{day.label}</td>
@@ -1298,7 +1327,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     return (
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
         <div className="table-scroll">
-          <table className="min-w-[980px] w-full border-collapse text-sm">
+          <table className="min-w-[1120px] w-full border-collapse text-sm">
             <thead className="bg-slate-50 text-left text-slate-600">
               <tr>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">人员</th>
@@ -1306,6 +1335,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">上午</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">下午</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">周末</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">节假日</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">调休</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">周末夜班</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">高峰</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">连续</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">安排明细</th>
@@ -1332,6 +1364,9 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.morningAssignments}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.afternoonAssignments}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendAssignments}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.makeupWorkdayAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendNightAssignments ?? 0}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.peakAssignments}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.maxConsecutiveDays} 天</td>
                   <td className="border-b border-slate-100 px-3 py-3">
@@ -1367,9 +1402,11 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             返回任务列表
           </Link>
           <h2 className="mt-3 text-2xl font-semibold text-slate-950">
-            {toDateKey(task.weekStartDate)} 至 {toDateKey(task.weekEndDate)}
+            {toDateKey(getTaskStartDate(task))} 至 {toDateKey(getTaskEndDate(task))}
           </h2>
           <div className="mt-2 flex flex-wrap gap-2 text-sm">
+            <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{task.name || "排班任务"}</span>
+            <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{PERIOD_TYPE_LABELS[task.periodType] ?? "7 天"} · {getDateRangeDayCount(getTaskStartDate(task), getTaskEndDate(task))} 天</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{TASK_SCHEDULE_MODE_LABELS[taskScheduleMode]}</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{taskScheduleMode === TASK_SCHEDULE_MODE.MEDTECH_ROOM ? MODE_LABELS[task.mode] : "按班次"}</span>
             <span className="rounded-full bg-white px-3 py-1 text-slate-700 ring-1 ring-slate-200">{STATUS_LABELS[task.status]}</span>
@@ -1436,6 +1473,20 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             </Link>
           </nav>
 
+          {ruleMonthOptions.length > 2 ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-table">
+              <span className="text-sm font-medium text-slate-700">按月查看规则/不可排</span>
+              <select
+                value={activeRulesMonth}
+                onChange={(event) => setActiveRulesMonth(event.target.value)}
+                className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm"
+              >
+                {ruleMonthOptions.map((month) => <option key={month} value={month}>{month}</option>)}
+              </select>
+              <span className="text-xs text-slate-500">批量填充仍作用于整个排班周期。</span>
+            </div>
+          ) : null}
+
           {activeTab === "requirements" ? renderRequirementControls() : null}
 
       {activeTab === "unavailable" ? (
@@ -1460,7 +1511,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                 <thead className="bg-slate-50 text-left text-slate-600">
                   <tr>
                     <th className="border-b border-slate-200 px-3 py-3 font-medium">人员</th>
-                    {weekDays.map((day) => (
+                    {visibleWeekDays.map((day) => (
                       <th key={day.dateKey} className="border-b border-slate-200 px-3 py-3 font-medium">
                         <div>{day.label}</div>
                         <div className="text-xs font-normal text-slate-400">{day.dateKey}</div>
@@ -1476,7 +1527,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                         <div className="font-medium text-slate-900">{doctor.name}</div>
                         <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-xs ${doctorTypeBadge(doctor.doctorType)}`}>{DOCTOR_TYPE_LABEL[doctor.doctorType]}</span>
                       </td>
-                      {weekDays.map((day) => {
+                      {visibleWeekDays.map((day) => {
                         const value = unavailableDraft[doctor.id]?.[day.dateKey] ?? { morning: false, afternoon: false };
                         return (
                           <td key={day.dateKey} className="border-b border-slate-100 px-3 py-3">

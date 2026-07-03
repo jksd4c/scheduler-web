@@ -1,5 +1,5 @@
 import { isDoctorUnavailable } from "@/lib/availability";
-import { addDays, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
+import { addDays, dateFromKey, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
 import { prisma } from "@/lib/prisma";
 import {
   SLOT_LABELS,
@@ -29,7 +29,21 @@ export async function getSchedulePreviewData(taskId: string) {
   const effectiveUnavailableTimes = [...task.unavailableTimes, ...(await getEffectiveFeedbackUnavailableTimes(task.id, task.doctors))];
   const cells = requirementsToCells(task.requirements);
   const scheduleMode = asTaskScheduleMode(task.scheduleMode);
-  const dateKeys = getDateRangeKeys(task.weekStartDate, task.weekEndDate);
+  const startDate = (task as any).startDate ?? task.weekStartDate;
+  const endDate = (task as any).endDate ?? task.weekEndDate;
+  const dateKeys = getDateRangeKeys(startDate, endDate);
+  const specialDates = await prisma.specialDate.findMany({
+    where: {
+      date: { gte: dateFromKey(toDateKey(startDate)), lte: dateFromKey(toDateKey(endDate)) },
+      OR: [
+        { unitId: task.unitId },
+        { unitId: null, departmentId: task.departmentId },
+        { unitId: null, departmentId: null, hospitalId: task.hospitalId }
+      ]
+    },
+    orderBy: [{ date: "asc" }, { createdAt: "desc" }]
+  });
+  const specialDateByKey = buildSpecialDateMap(specialDates);
   const cellsByDate = new Map<string, any[]>();
   const conflictsByCell = new Map<string, any[]>();
   const conflictsByDate = new Map<string, any[]>();
@@ -67,13 +81,14 @@ export async function getSchedulePreviewData(taskId: string) {
 
   const calendarDays = dateKeys.map((dateKey) => {
     const weekday = weekdayFromDateKey(dateKey);
-    const dateType = dateTypeForWeekday(weekday);
+    const specialDate = specialDateByKey.get(dateKey);
+    const dateType = normalizeDateType(specialDate?.dateType) ?? dateTypeForWeekday(weekday);
     return {
       dateKey,
       weekday,
       weekdayLabel: getWeekdayLabel(weekday),
       dateType,
-      dateTypeLabel: dateTypeLabel(dateType),
+      dateTypeLabel: specialDate?.name || dateTypeLabel(dateType),
       cells: cellsByDate.get(dateKey) ?? [],
       conflicts: conflictsByDate.get(dateKey) ?? []
     };
@@ -260,11 +275,49 @@ function dateTypeForWeekday(weekday: number) {
   return weekday === 6 || weekday === 7 ? "WEEKEND" : "WORKDAY";
 }
 
+function normalizeDateType(value?: string | null) {
+  if (!value) return null;
+  if (value === "HOLIDAY") return "PUBLIC_HOLIDAY";
+  if (value === "CUSTOM_REST") return "CUSTOM_REST_DAY";
+  if (value === "CUSTOM_SPECIAL") return "CUSTOM_SPECIAL_DAY";
+  if (
+    value === "WORKDAY" ||
+    value === "WEEKEND" ||
+    value === "PUBLIC_HOLIDAY" ||
+    value === "MAKEUP_WORKDAY" ||
+    value === "CUSTOM_REST_DAY" ||
+    value === "CUSTOM_SPECIAL_DAY"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function dateTypeLabel(value: string) {
   if (value === "WEEKEND") return "周末";
-  if (value === "HOLIDAY") return "法定节假日";
+  if (value === "HOLIDAY" || value === "PUBLIC_HOLIDAY") return "法定节假日";
   if (value === "MAKEUP_WORKDAY") return "调休上班";
-  if (value === "CUSTOM_REST") return "自定义休息";
-  if (value === "CUSTOM_SPECIAL") return "特殊日期";
+  if (value === "CUSTOM_REST" || value === "CUSTOM_REST_DAY") return "自定义休息";
+  if (value === "CUSTOM_SPECIAL" || value === "CUSTOM_SPECIAL_DAY") return "特殊日期";
   return "工作日";
+}
+
+function buildSpecialDateMap<T extends { date: Date; dateType: string }>(items: T[]) {
+  const output = new Map<string, T>();
+  for (const item of items) {
+    const key = toDateKey(item.date);
+    const current = output.get(key);
+    if (!current || specialDatePriority(item.dateType) > specialDatePriority(current.dateType)) {
+      output.set(key, item);
+    }
+  }
+  return output;
+}
+
+function specialDatePriority(type: string) {
+  if (type === "MAKEUP_WORKDAY") return 40;
+  if (type === "PUBLIC_HOLIDAY" || type === "HOLIDAY") return 30;
+  if (type === "CUSTOM_REST_DAY" || type === "CUSTOM_REST") return 20;
+  if (type === "CUSTOM_SPECIAL_DAY" || type === "CUSTOM_SPECIAL") return 10;
+  return 0;
 }

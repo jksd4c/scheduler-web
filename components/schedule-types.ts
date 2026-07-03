@@ -1,6 +1,7 @@
 export type ScheduleMode = "FULL_DAY" | "HALF_DAY";
 export type TaskScheduleMode = "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
 export type ScheduleStatus = "DRAFT" | "RULES_SET" | "PREVIEW" | "GENERATED" | "PUBLISHED" | "LOCKED";
+export type SchedulePeriodType = "DAYS_7" | "DAYS_30" | "CALENDAR_MONTH" | "QUARTER" | "YEAR" | "CUSTOM";
 export type DoctorType = "RESIDENT" | "INTERN";
 export type TimeSlot = "FULL_DAY" | "MORNING" | "AFTERNOON";
 export type ConflictSeverity = "INFO" | "WARNING" | "ERROR";
@@ -97,6 +98,14 @@ export type DoctorStats = {
   morningAssignments: number;
   afternoonAssignments: number;
   weekendAssignments: number;
+  holidayAssignments?: number;
+  makeupWorkdayAssignments?: number;
+  customRestAssignments?: number;
+  customSpecialAssignments?: number;
+  weekendNightAssignments?: number;
+  holidayNightAssignments?: number;
+  saturdayNightAssignments?: number;
+  sundayNightAssignments?: number;
   peakAssignments: number;
   maxConsecutiveDays: number;
   hasConsecutiveWork: boolean;
@@ -154,6 +163,10 @@ export type ScheduleStats = {
 
 export type ApiTaskDetail = {
   id: string;
+  name?: string | null;
+  startDate: string;
+  endDate: string;
+  periodType: SchedulePeriodType;
   weekStartDate: string;
   weekEndDate: string;
   mode: ScheduleMode;
@@ -171,6 +184,7 @@ export type ApiTaskDetail = {
 
 export type ApiTaskListItem = {
   id: string;
+  name?: string | null;
   department?: {
     id: string;
     name: string;
@@ -181,6 +195,9 @@ export type ApiTaskListItem = {
     name: string;
     isActive?: boolean;
   } | null;
+  startDate: string;
+  endDate: string;
+  periodType: SchedulePeriodType;
   weekStartDate: string;
   weekEndDate: string;
   mode: ScheduleMode;

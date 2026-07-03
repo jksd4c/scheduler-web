@@ -1,5 +1,5 @@
 import { isDoctorUnavailable, type UnavailableRecord } from "@/lib/availability";
-import { getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
+import { getDateRangeDates, getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
 import {
   getExpectedAssignmentCountFromRequirements,
   isPeakDay,
@@ -61,6 +61,14 @@ export type DoctorScheduleStats = {
   morningAssignments: number;
   afternoonAssignments: number;
   weekendAssignments: number;
+  holidayAssignments: number;
+  makeupWorkdayAssignments: number;
+  customRestAssignments: number;
+  customSpecialAssignments: number;
+  weekendNightAssignments: number;
+  holidayNightAssignments: number;
+  saturdayNightAssignments: number;
+  sundayNightAssignments: number;
   peakAssignments: number;
   maxConsecutiveDays: number;
   hasConsecutiveWork: boolean;
@@ -110,15 +118,22 @@ export type ScheduleStats = {
 
 export function calculateScheduleStats(input: {
   mode: ScheduleModeValue;
-  weekStartDate: Date | string;
+  weekStartDate?: Date | string;
+  startDate?: Date | string;
+  endDate?: Date | string;
   doctors: DoctorLike[];
   requirements: ScheduleRequirementLike[];
   assignments: AssignmentLike[];
   unavailableTimes: UnavailableRecord[];
   conflicts: ConflictLike[];
+  specialDateTypes?: Record<string, string> | Map<string, string>;
 }): ScheduleStats {
-  const weekDates = getWeekDates(input.weekStartDate);
-  const weekDateKeys = weekDates.map((day) => day.dateKey);
+  const rangeDates =
+    input.startDate && input.endDate
+      ? getDateRangeDates(input.startDate, input.endDate)
+      : getWeekDates(input.weekStartDate ?? new Date());
+  const rangeDateKeys = rangeDates.map((day) => day.dateKey);
+  const specialDateTypes = normalizeSpecialDateTypes(input.specialDateTypes);
 
   const perDoctorMap = new Map<string, DoctorScheduleStats>();
   for (const doctor of input.doctors) {
@@ -133,6 +148,14 @@ export function calculateScheduleStats(input: {
       morningAssignments: 0,
       afternoonAssignments: 0,
       weekendAssignments: 0,
+      holidayAssignments: 0,
+      makeupWorkdayAssignments: 0,
+      customRestAssignments: 0,
+      customSpecialAssignments: 0,
+      weekendNightAssignments: 0,
+      holidayNightAssignments: 0,
+      saturdayNightAssignments: 0,
+      sundayNightAssignments: 0,
       peakAssignments: 0,
       maxConsecutiveDays: 0,
       hasConsecutiveWork: false,
@@ -163,6 +186,7 @@ export function calculateScheduleStats(input: {
     }
 
     const dateKey = toDateKey(assignment.date);
+    const effectiveDateType = getEffectiveDateType(dateKey, assignment.weekday, specialDateTypes);
     stats.totalAssignments += 1;
     if (assignment.timeSlot === TIME_SLOT.FULL_DAY) {
       stats.fullDayAssignments += 1;
@@ -173,9 +197,13 @@ export function calculateScheduleStats(input: {
     if (assignment.timeSlot === TIME_SLOT.AFTERNOON) {
       stats.afternoonAssignments += 1;
     }
-    if (isWeekend(assignment.weekday)) {
+    if (effectiveDateType === "WEEKEND") {
       stats.weekendAssignments += 1;
     }
+    if (effectiveDateType === "PUBLIC_HOLIDAY") stats.holidayAssignments += 1;
+    if (effectiveDateType === "MAKEUP_WORKDAY") stats.makeupWorkdayAssignments += 1;
+    if (effectiveDateType === "CUSTOM_REST_DAY") stats.customRestAssignments += 1;
+    if (effectiveDateType === "CUSTOM_SPECIAL_DAY") stats.customSpecialAssignments += 1;
     if (isPeakDay(assignment.weekday)) {
       stats.peakAssignments += 1;
     }
@@ -189,6 +217,10 @@ export function calculateScheduleStats(input: {
     const isNightShift = Boolean(matchingCell?.shiftType?.isNight) || category === SHIFT_TYPE_CATEGORY.NIGHT;
     if (isNightShift) {
       stats.nightShiftAssignments += 1;
+      if (effectiveDateType === "WEEKEND") stats.weekendNightAssignments += 1;
+      if (effectiveDateType === "PUBLIC_HOLIDAY") stats.holidayNightAssignments += 1;
+      if (assignment.weekday === 6 && effectiveDateType !== "MAKEUP_WORKDAY") stats.saturdayNightAssignments += 1;
+      if (assignment.weekday === 7 && effectiveDateType !== "MAKEUP_WORKDAY") stats.sundayNightAssignments += 1;
     } else {
       stats.dayShiftAssignments += 1;
     }
@@ -223,7 +255,7 @@ export function calculateScheduleStats(input: {
     const workedDates = workedDateKeysByDoctor.get(stats.doctorId) ?? new Set<string>();
     let current = 0;
     let max = 0;
-    for (const dateKey of weekDateKeys) {
+    for (const dateKey of rangeDateKeys) {
       if (workedDates.has(dateKey)) {
         current += 1;
         max = Math.max(max, current);
@@ -333,4 +365,41 @@ function buildIdentityGroups(perDoctor: DoctorScheduleStats[]) {
       secondLineAssignments: group.secondLineAssignments
     }))
     .sort((a, b) => a.tagName.localeCompare(b.tagName, "zh-Hans-CN"));
+}
+
+function normalizeSpecialDateTypes(input?: Record<string, string> | Map<string, string>) {
+  const output = new Map<string, string>();
+  if (!input) return output;
+  const entries = input instanceof Map ? Array.from(input.entries()) : Object.entries(input);
+  for (const [dateKey, rawType] of entries) {
+    const type = normalizeSpecialDateType(rawType);
+    if (type) {
+      output.set(dateKey, type);
+    }
+  }
+  return output;
+}
+
+function getEffectiveDateType(dateKey: string, weekday: number, specialDateTypes: Map<string, string>) {
+  const specialType = normalizeSpecialDateType(specialDateTypes.get(dateKey));
+  if (specialType) return specialType;
+  return isWeekend(weekday) ? "WEEKEND" : "WORKDAY";
+}
+
+function normalizeSpecialDateType(value?: string | null) {
+  if (!value) return null;
+  if (value === "HOLIDAY") return "PUBLIC_HOLIDAY";
+  if (value === "CUSTOM_REST") return "CUSTOM_REST_DAY";
+  if (value === "CUSTOM_SPECIAL") return "CUSTOM_SPECIAL_DAY";
+  if (
+    value === "WORKDAY" ||
+    value === "WEEKEND" ||
+    value === "PUBLIC_HOLIDAY" ||
+    value === "MAKEUP_WORKDAY" ||
+    value === "CUSTOM_REST_DAY" ||
+    value === "CUSTOM_SPECIAL_DAY"
+  ) {
+    return value;
+  }
+  return null;
 }

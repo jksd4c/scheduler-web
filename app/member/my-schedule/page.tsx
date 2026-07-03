@@ -17,7 +17,7 @@ export default async function MySchedulePage() {
   const assignments = staffProfiles.length
     ? await prisma.scheduleAssignment.findMany({
         where: { doctor: { staffProfileId: { in: staffProfiles.map((item) => item.id) } } },
-        include: { doctor: true, scheduleTask: { select: { weekStartDate: true, weekEndDate: true } } },
+        include: { doctor: true, scheduleTask: { select: { startDate: true, endDate: true, weekStartDate: true, weekEndDate: true } } },
         orderBy: [{ date: "desc" }]
       })
     : [];
@@ -36,7 +36,7 @@ export default async function MySchedulePage() {
             <tbody>
               {assignments.length ? assignments.map((assignment) => (
                 <tr key={assignment.id}>
-                  <td className="border-b border-slate-100 px-3 py-3">{toDateKey(assignment.scheduleTask.weekStartDate)} 至 {toDateKey(assignment.scheduleTask.weekEndDate)}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{toDateKey(assignment.scheduleTask.startDate ?? assignment.scheduleTask.weekStartDate)} 至 {toDateKey(assignment.scheduleTask.endDate ?? assignment.scheduleTask.weekEndDate)}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{toDateKey(assignment.date)}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{getWeekdayLabel(assignment.weekday)}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{SLOT_LABELS[asTimeSlot(assignment.timeSlot)]}</td>

@@ -67,6 +67,7 @@ model Unit {
   shiftTypes      ShiftType[]
   feedback        Feedback[]
   auditLogs       AuditLog[]
+  specialDates    SpecialDate[]
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -74,6 +75,27 @@ model Unit {
   @@index([hospitalId])
   @@index([departmentId])
   @@index([createdByUserId])
+}
+
+model SpecialDate {
+  id           String   @id @default(cuid())
+  hospitalId   String?
+  departmentId String?
+  unitId       String?
+  unit         Unit?    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  date         DateTime
+  dateType     String
+  name         String?
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@index([unitId])
+  @@index([date])
+  @@index([dateType])
+  @@unique([unitId, date, dateType])
 }
 
 model User {
@@ -160,8 +182,12 @@ model ScheduleTask {
   unit             Unit?                   @relation(fields: [unitId], references: [id], onDelete: SetNull)
   createdByUserId  String?
   createdByUser    User?                   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  name             String?
   weekStartDate    DateTime
   weekEndDate      DateTime
+  startDate        DateTime
+  endDate          DateTime
+  periodType       String                  @default("DAYS_30")
   mode             String
   scheduleMode     String                  @default("WARD_SHIFT")
   status           String                  @default("DRAFT")
@@ -179,6 +205,9 @@ model ScheduleTask {
   @@index([unitId])
   @@index([createdByUserId])
   @@index([weekStartDate])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([periodType])
   @@index([status])
   @@index([scheduleMode])
   @@index([createdAt])

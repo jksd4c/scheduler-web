@@ -1,4 +1,4 @@
-import { toDateKey, type WeekdayNumber } from "@/lib/date-utils";
+import { toDateKey, type PeriodType, type WeekdayNumber } from "@/lib/date-utils";
 
 export type ScheduleModeValue = "FULL_DAY" | "HALF_DAY";
 export type TaskScheduleModeValue = "WARD_SHIFT" | "MEDTECH_ROOM" | "CUSTOM";
@@ -6,6 +6,7 @@ export type ScheduleStatusValue = "DRAFT" | "RULES_SET" | "PREVIEW" | "GENERATED
 export type DoctorTypeValue = "RESIDENT" | "INTERN";
 export type TimeSlotValue = "FULL_DAY" | "MORNING" | "AFTERNOON";
 export type ConflictSeverityValue = "INFO" | "WARNING" | "ERROR";
+export type SchedulePeriodTypeValue = PeriodType;
 
 export const SCHEDULE_MODE = {
   FULL_DAY: "FULL_DAY",
@@ -25,6 +26,15 @@ export const SCHEDULE_STATUS = {
   GENERATED: "GENERATED",
   PUBLISHED: "PUBLISHED",
   LOCKED: "LOCKED"
+} as const;
+
+export const SCHEDULE_PERIOD_TYPE = {
+  DAYS_7: "DAYS_7",
+  DAYS_30: "DAYS_30",
+  CALENDAR_MONTH: "CALENDAR_MONTH",
+  QUARTER: "QUARTER",
+  YEAR: "YEAR",
+  CUSTOM: "CUSTOM"
 } as const;
 
 export const DOCTOR_TYPE = {
@@ -69,6 +79,28 @@ export const STATUS_LABELS: Record<ScheduleStatusValue, string> = {
   PUBLISHED: "\u5df2\u53d1\u5e03",
   LOCKED: "\u5df2\u9501\u5b9a"
 };
+
+export const PERIOD_TYPE_LABELS: Record<SchedulePeriodTypeValue, string> = {
+  DAYS_7: "7 天",
+  DAYS_30: "30 天",
+  CALENDAR_MONTH: "自然月",
+  QUARTER: "季度",
+  YEAR: "年度",
+  CUSTOM: "自定义"
+};
+
+export function asPeriodType(value: string | null | undefined): SchedulePeriodTypeValue {
+  if (
+    value === SCHEDULE_PERIOD_TYPE.DAYS_7 ||
+    value === SCHEDULE_PERIOD_TYPE.CALENDAR_MONTH ||
+    value === SCHEDULE_PERIOD_TYPE.QUARTER ||
+    value === SCHEDULE_PERIOD_TYPE.YEAR ||
+    value === SCHEDULE_PERIOD_TYPE.CUSTOM
+  ) {
+    return value;
+  }
+  return SCHEDULE_PERIOD_TYPE.DAYS_30;
+}
 
 export type ScheduleRequirementLike = {
   id?: string;
@@ -167,8 +199,8 @@ export function getTimeSlotsForMode(mode: ScheduleModeValue): TimeSlotValue[] {
     : [TIME_SLOT.MORNING, TIME_SLOT.AFTERNOON];
 }
 
-export function buildDefaultRequirements(mode: ScheduleModeValue, weekStartDate: Date | string, scheduleTaskId?: string) {
-  const _unused = { mode, weekStartDate, scheduleTaskId };
+export function buildDefaultRequirements(mode: ScheduleModeValue, startDate: Date | string, scheduleTaskId?: string) {
+  const _unused = { mode, startDate, scheduleTaskId };
   void _unused;
   return [] as Array<{
     scheduleTaskId?: string;

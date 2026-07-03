@@ -88,7 +88,9 @@ export async function POST(request: Request) {
 
 async function getPeriodDays(scheduleTaskId: string | null) {
   if (!scheduleTaskId) return 7;
-  const task = await prisma.scheduleTask.findUnique({ where: { id: scheduleTaskId }, select: { weekStartDate: true, weekEndDate: true } });
+  const task = await prisma.scheduleTask.findUnique({ where: { id: scheduleTaskId }, select: { startDate: true, endDate: true, weekStartDate: true, weekEndDate: true } });
   if (!task) return 7;
-  return Math.max(1, Math.round((task.weekEndDate.getTime() - task.weekStartDate.getTime()) / 86400000) + 1);
+  const start = task.startDate ?? task.weekStartDate;
+  const end = task.endDate ?? task.weekEndDate;
+  return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
 }

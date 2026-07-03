@@ -192,7 +192,7 @@ async function login(username, password) {
   });
 }
 
-function nextMondayKey() {
+function nextSmokeStartDateKey() {
   const now = new Date();
   const day = now.getDay() || 7;
   const diff = day === 1 ? 7 : 8 - day;
@@ -273,6 +273,7 @@ async function main() {
   assert(Boolean(organization?.departments[0]), "active hospital and department exist for registration");
 
   const unique = Date.now().toString(36);
+  const smokeStartDate = nextSmokeStartDateKey();
   const registerPassword = `Smoke-${unique}-Pass1`;
   const registerResult = await jsonRequest("/api/register", {
     method: "POST",
@@ -312,6 +313,26 @@ async function main() {
 
   const shiftTypesPage = await request("/dashboard/shift-types", { headers: { Cookie: registerResult.cookie } });
   assert(shiftTypesPage.status === 200, "SCHEDULER_ADMIN can access shift type settings");
+
+  const specialDatesPage = await request("/dashboard/special-dates", { headers: { Cookie: registerResult.cookie } });
+  assert(specialDatesPage.status === 200, "SCHEDULER_ADMIN can access special date settings");
+
+  const specialDateResult = await jsonRequest("/api/special-dates", {
+    method: "POST",
+    headers: { Cookie: registerResult.cookie },
+    body: JSON.stringify({
+      date: smokeStartDate,
+      dateType: "PUBLIC_HOLIDAY",
+      name: `Smoke holiday ${unique}`
+    })
+  });
+  assert(specialDateResult.response.status === 201, "SCHEDULER_ADMIN can save special date");
+
+  const deleteSpecialDateResult = await jsonRequest(`/api/special-dates/${specialDateResult.data.specialDate.id}`, {
+    method: "DELETE",
+    headers: { Cookie: registerResult.cookie }
+  });
+  assert(deleteSpecialDateResult.response.status === 200, "SCHEDULER_ADMIN can delete special date");
 
   async function createTag(name, category, policy) {
     const result = await jsonRequest("/api/staff-tags", {
@@ -372,17 +393,19 @@ async function main() {
     { staffTagId: internTag.id, requirementType: "FORBIDDEN" }
   ]);
 
-  const weekStartDate = nextMondayKey();
   const taskResult = await jsonRequest("/api/tasks", {
     method: "POST",
     headers: { Cookie: registerResult.cookie },
     body: JSON.stringify({
-      weekStartDate,
-      mode: "HALF_DAY",
+      name: `Smoke 30-day task ${unique}`,
+      startDate: smokeStartDate,
+      periodType: "DAYS_7",
+      scheduleMode: "WARD_SHIFT",
       staffProfileIds: [seniorStaff.id, internStaff.id]
     })
   });
   assert(taskResult.response.status === 201, "created task from staff profiles");
+  assert(taskResult.data.task.periodType === "DAYS_7", "created task supports explicit date-range period");
   const taskId = taskResult.data.task.id;
 
   const requirementsResult = await jsonRequest(`/api/tasks/${taskId}/requirements`, {
@@ -390,8 +413,8 @@ async function main() {
     headers: { Cookie: registerResult.cookie },
     body: JSON.stringify({
       records: [
-        { date: weekStartDate, weekday: 1, timeSlot: "MORNING", roomNumber: 1, requiredDoctors: 1, enabled: true, shiftTypeId: secondLineShift.id },
-        { date: weekStartDate, weekday: 1, timeSlot: "AFTERNOON", roomNumber: 1, requiredDoctors: 2, enabled: true, shiftTypeId: nightShift.id }
+        { date: smokeStartDate, weekday: 1, timeSlot: "FULL_DAY", roomNumber: 1, requiredDoctors: 1, enabled: true, shiftTypeId: secondLineShift.id },
+        { date: smokeStartDate, weekday: 1, timeSlot: "FULL_DAY", roomNumber: 2, requiredDoctors: 2, enabled: true, shiftTypeId: nightShift.id }
       ]
     })
   });
@@ -404,7 +427,7 @@ async function main() {
   });
   assert(generateResult.response.status === 200, "generated schedule with identity strategy");
   const generatedTask = generateResult.data.task;
-  const nightAssignments = generatedTask.assignments.filter((assignment) => assignment.timeSlot === "AFTERNOON");
+  const nightAssignments = generatedTask.assignments.filter((assignment) => assignment.roomNumber === 2);
   assert(nightAssignments.every((assignment) => !assignment.doctor.name.includes("实习人员")), "night shift excludes intern tag");
   assert(generatedTask.conflicts.some((conflict) => conflict.conflictType === "UNFILLED"), "identity shortage creates unfilled conflict");
   assert(generatedTask.stats.identityGroups.length > 0, "fairness report includes identity groups");

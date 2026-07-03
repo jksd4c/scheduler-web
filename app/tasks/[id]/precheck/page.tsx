@@ -31,7 +31,7 @@ export default async function TaskPrecheckPage({ params }: { params: { id: strin
     return <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">无权限访问</div>;
   }
   const [task, roster, claims, feedback] = await Promise.all([
-    prisma.scheduleTask.findUnique({ where: { id: params.id }, select: { weekStartDate: true, weekEndDate: true } }),
+    prisma.scheduleTask.findUnique({ where: { id: params.id }, select: { startDate: true, endDate: true, weekStartDate: true, weekEndDate: true, periodType: true } }),
     prisma.rosterEntry.findMany({ where: { scheduleTaskId: params.id }, orderBy: { createdAt: "asc" } }),
     prisma.joinClaim.findMany({ where: { scheduleTaskId: params.id }, orderBy: { createdAt: "desc" } }),
     prisma.memberFeedback.findMany({ where: { scheduleTaskId: params.id }, include: { unavailableTimes: true }, orderBy: { createdAt: "desc" } })
@@ -49,7 +49,7 @@ export default async function TaskPrecheckPage({ params }: { params: { id: strin
           <Link href={`/tasks/${params.id}`} className="text-sm text-slate-600 hover:text-slate-950">返回任务详情</Link>
           <h2 className="mt-2 text-2xl font-semibold text-slate-950">排班前检查 / 冲突处理</h2>
           <p className="mt-1 text-sm text-slate-600">
-            {task ? `${task.weekStartDate.toISOString().slice(0, 10)} 至 ${task.weekEndDate.toISOString().slice(0, 10)}` : ""}
+            {task ? `${(task.startDate ?? task.weekStartDate).toISOString().slice(0, 10)} 至 ${(task.endDate ?? task.weekEndDate).toISOString().slice(0, 10)}` : ""}
             只有身份已确认且反馈已生效的硬性不可排会进入自动排班。
           </p>
         </div>

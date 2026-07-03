@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, isSchedulerAdminRole, requireUser, USER_ROLE } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
-import { dateFromKey, getWeekEndDateKey } from "@/lib/date-utils";
+import { dateFromKey, getDateRangeDayCount, getPeriodRange, getTodayDateKey, toDateKey } from "@/lib/date-utils";
 import { mergeDoctorNameLists } from "@/lib/name-parser";
 import { getDefaultActiveUnit, getOrCreateDefaultUnit } from "@/lib/organizations";
 import { prisma } from "@/lib/prisma";
-import { DOCTOR_TYPE, SCHEDULE_MODE, SCHEDULE_STATUS, TASK_SCHEDULE_MODE, asTaskScheduleMode } from "@/lib/schedule-rules";
+import { DOCTOR_TYPE, SCHEDULE_MODE, SCHEDULE_PERIOD_TYPE, SCHEDULE_STATUS, TASK_SCHEDULE_MODE, asPeriodType, asTaskScheduleMode } from "@/lib/schedule-rules";
 import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
@@ -37,6 +37,10 @@ export async function GET(request: Request) {
         take: pageSize,
         select: {
           id: true,
+          name: true,
+          startDate: true,
+          endDate: true,
+          periodType: true,
           weekStartDate: true,
           weekEndDate: true,
           mode: true,
@@ -76,7 +80,18 @@ export async function POST(request: Request) {
     const user = await requireUser();
     role = user.role;
     const body = await request.json();
-    const weekStartDate = String(body.weekStartDate ?? "").slice(0, 10);
+    const taskName = String(body.name ?? "").trim() || "排班任务";
+    const periodType = asPeriodType(String(body.periodType ?? SCHEDULE_PERIOD_TYPE.DAYS_30));
+    const requestedStartDate = String(body.startDate ?? body.weekStartDate ?? getTodayDateKey()).slice(0, 10);
+    const requestedEndDate = String(body.endDate ?? "").slice(0, 10);
+    const periodRange = getPeriodRange(periodType, requestedStartDate, {
+      year: Number(body.year) || undefined,
+      month: Number(body.month) || undefined,
+      quarter: Number(body.quarter) || undefined,
+      endDate: requestedEndDate || undefined
+    });
+    const startDate = periodRange.startDate;
+    const endDate = periodRange.endDate;
     const hasExplicitScheduleMode = body.scheduleMode != null && String(body.scheduleMode).trim() !== "";
     const scheduleMode = hasExplicitScheduleMode
       ? asTaskScheduleMode(String(body.scheduleMode))
@@ -86,8 +101,23 @@ export async function POST(request: Request) {
         ? SCHEDULE_MODE.HALF_DAY
         : SCHEDULE_MODE.FULL_DAY;
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartDate)) {
-      return withApiTiming(NextResponse.json({ message: "排班周开始日期格式无效" }, { status: 400 }), {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return withApiTiming(NextResponse.json({ message: "排班日期格式无效" }, { status: 400 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
+    }
+    if (dateFromKey(endDate).getTime() < dateFromKey(startDate).getTime()) {
+      return withApiTiming(NextResponse.json({ message: "结束日期不能早于开始日期" }, { status: 400 }), {
+        route: "POST /api/tasks",
+        start,
+        role
+      });
+    }
+    const periodDays = getDateRangeDayCount(startDate, endDate);
+    if (periodDays > 366) {
+      return withApiTiming(NextResponse.json({ message: "自定义周期最长暂定 366 天，请拆分任务" }, { status: 400 }), {
         route: "POST /api/tasks",
         start,
         role
@@ -194,15 +224,18 @@ export async function POST(request: Request) {
       };
     });
 
-    const weekEndDate = getWeekEndDateKey(weekStartDate);
     const task = await prisma.scheduleTask.create({
       data: {
+        name: taskName,
         hospitalId,
         departmentId,
         unitId,
         createdByUserId: user.id,
-        weekStartDate: dateFromKey(weekStartDate),
-        weekEndDate: dateFromKey(weekEndDate),
+        weekStartDate: dateFromKey(startDate),
+        weekEndDate: dateFromKey(endDate),
+        startDate: dateFromKey(startDate),
+        endDate: dateFromKey(endDate),
+        periodType,
         mode,
         scheduleMode,
         status: SCHEDULE_STATUS.DRAFT,
@@ -251,10 +284,13 @@ export async function POST(request: Request) {
       targetType: "ScheduleTask",
       targetId: task.id,
       afterJson: {
-        weekStartDate,
-        weekEndDate,
+        name: taskName,
+        startDate,
+        endDate,
+        periodType,
         mode,
         scheduleMode,
+        periodDays,
         staffProfileCount: staffProfiles.length,
         manualPersonnelCount: manualDoctors.length,
         personnelCount: task.doctors.length

@@ -64,8 +64,11 @@ const dateTypeClass: Record<string, string> = {
   WORKDAY: "bg-white",
   WEEKEND: "bg-sky-50",
   HOLIDAY: "bg-red-50",
+  PUBLIC_HOLIDAY: "bg-red-50",
   MAKEUP_WORKDAY: "bg-orange-50",
   CUSTOM_REST: "bg-purple-50",
+  CUSTOM_REST_DAY: "bg-purple-50",
+  CUSTOM_SPECIAL_DAY: "bg-yellow-50",
   CUSTOM_SPECIAL: "bg-yellow-50"
 };
 
@@ -79,6 +82,7 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
   const [showNonCompliant, setShowNonCompliant] = useState(false);
   const [forceOverride, setForceOverride] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
+  const [activeMonth, setActiveMonth] = useState("");
 
   async function load() {
     setBusy("load");
@@ -105,6 +109,15 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
     }
     return Array.from(groups.entries());
   }, [preview]);
+
+  useEffect(() => {
+    if (!monthGroups.length) return;
+    if (!activeMonth || !monthGroups.some(([month]) => month === activeMonth)) {
+      setActiveMonth(monthGroups[0][0]);
+    }
+  }, [activeMonth, monthGroups]);
+
+  const visibleMonthGroups = monthGroups.length > 2 && activeMonth ? monthGroups.filter(([month]) => month === activeMonth) : monthGroups;
 
   function openEdit(cell: Cell) {
     setEditingCell(cell);
@@ -251,7 +264,16 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
           </div>
 
           <div className="space-y-8">
-            {monthGroups.map(([month, days]) => (
+            {monthGroups.length > 2 ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
+                <span className="text-sm font-medium text-slate-700">按月查看</span>
+                <select value={activeMonth} onChange={(event) => setActiveMonth(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  {monthGroups.map(([month]) => <option key={month} value={month}>{month}</option>)}
+                </select>
+                <span className="text-xs text-slate-500">长周期默认只渲染一个月，避免页面卡顿。</span>
+              </div>
+            ) : null}
+            {visibleMonthGroups.map(([month, days]) => (
               <div key={month} className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-slate-950">{month}</h3>

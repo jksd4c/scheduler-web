@@ -146,8 +146,12 @@ async function refreshWaitingFeedback(tx: any, joinClaimId: string, scheduleTask
   });
   let periodDays = 7;
   if (scheduleTaskId) {
-    const task = await tx.scheduleTask.findUnique({ where: { id: scheduleTaskId }, select: { weekStartDate: true, weekEndDate: true } });
-    if (task) periodDays = Math.max(1, Math.round((task.weekEndDate.getTime() - task.weekStartDate.getTime()) / 86400000) + 1);
+    const task = await tx.scheduleTask.findUnique({ where: { id: scheduleTaskId }, select: { startDate: true, endDate: true, weekStartDate: true, weekEndDate: true } });
+    if (task) {
+      const start = task.startDate ?? task.weekStartDate;
+      const end = task.endDate ?? task.weekEndDate;
+      periodDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+    }
   }
   for (const item of feedback) {
     const status = evaluateFeedbackStatus({
