@@ -348,6 +348,9 @@ model ScheduleDoctor {
   name               String
   doctorType         String
   active             Boolean                 @default(true)
+  preferredShiftType String                  @default("NONE")
+  preferenceStrength String                  @default("NORMAL")
+  preferenceNote     String?
   tagSnapshotJson    Json?
   policySnapshotJson Json?
   participant        ScheduleParticipant?
@@ -359,6 +362,7 @@ model ScheduleDoctor {
   @@index([departmentId])
   @@index([scheduleTaskId])
   @@index([staffProfileId])
+  @@index([preferredShiftType])
 }
 
 model DoctorUnavailableTime {
@@ -517,6 +521,9 @@ model StaffProfile {
   phone           String?
   email           String?
   active          Boolean               @default(true)
+  preferredShiftType String             @default("NONE")
+  preferenceStrength String             @default("NORMAL")
+  preferenceNote String?
   note            String?
   tags            StaffProfileTag[]
   rosterEntries   RosterEntry[]
@@ -533,6 +540,7 @@ model StaffProfile {
   @@index([poolType])
   @@index([active])
   @@index([unitId, active])
+  @@index([preferredShiftType])
 }
 
 model StaffProfileTag {
@@ -700,6 +708,9 @@ model MemberFeedback {
   unitId              String?
   title               String?
   message             String?
+  preferredShiftType  String   @default("NONE")
+  preferenceStrength  String   @default("NORMAL")
+  preferenceNote      String?
   canWorkShiftTypeIds Json?
   status              String   @default("WAITING_IDENTITY_CONFIRMATION")
   effective           Boolean  @default(false)
@@ -720,6 +731,7 @@ model MemberFeedback {
   @@index([unitId])
   @@index([status])
   @@index([effective])
+  @@index([preferredShiftType])
   @@index([createdAt])
   @@index([unitId, createdAt])
   @@index([scheduleTaskId, effective])

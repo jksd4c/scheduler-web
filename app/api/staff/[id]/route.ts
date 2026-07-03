@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
+import { normalizePreferredShiftType, normalizePreferenceStrength } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 import { buildTagSnapshot, resolveEffectivePolicy, summarizeEligibility } from "@/lib/staff-policy";
 
@@ -49,6 +50,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     if ("phone" in body) data.phone = nullableString(body.phone);
     if ("email" in body) data.email = nullableString(body.email);
     if ("note" in body) data.note = nullableString(body.note);
+    if ("preferredShiftType" in body) data.preferredShiftType = normalizePreferredShiftType(body.preferredShiftType);
+    if ("preferenceStrength" in body) data.preferenceStrength = normalizePreferenceStrength(body.preferenceStrength);
+    if ("preferenceNote" in body) data.preferenceNote = nullableString(body.preferenceNote);
     if ("active" in body) data.active = body.active !== false;
 
     await prisma.$transaction(async (tx) => {

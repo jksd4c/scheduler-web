@@ -249,6 +249,9 @@ export async function POST(request: Request) {
         name: profile.displayName,
         doctorType: profile.poolType === STAFF_POOL_TYPE.ROTATION ? DOCTOR_TYPE.INTERN : DOCTOR_TYPE.RESIDENT,
         active: profile.active,
+        preferredShiftType: profile.preferredShiftType,
+        preferenceStrength: profile.preferenceStrength,
+        preferenceNote: profile.preferenceNote,
         tagSnapshotJson: tagSnapshot,
         policySnapshotJson: policySnapshot
       };
@@ -275,6 +278,9 @@ export async function POST(request: Request) {
             ...manualDoctors.map((doctor) => ({
               ...doctor,
               active: true,
+              preferredShiftType: "NONE",
+              preferenceStrength: "NORMAL",
+              preferenceNote: null,
               tagSnapshotJson: [],
               policySnapshotJson: { participatesInScheduling: true, workloadFactor: 1, sourceTagNames: [] }
             }))

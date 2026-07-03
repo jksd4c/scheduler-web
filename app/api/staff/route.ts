@@ -3,6 +3,7 @@ import { nowMs, withApiTiming } from "@/lib/api-timing";
 import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { mergeDoctorNameLists } from "@/lib/name-parser";
+import { normalizePreferredShiftType, normalizePreferenceStrength } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 import { buildTagSnapshot, resolveEffectivePolicy, summarizeEligibility } from "@/lib/staff-policy";
 
@@ -60,6 +61,9 @@ export async function POST(request: Request) {
     const tagIds = await validateUnitTagIds(unit.id, body.tagIds);
     const active = body.active !== false;
     const note = nullableString(body.note);
+    const preferredShiftType = normalizePreferredShiftType(body.preferredShiftType);
+    const preferenceStrength = normalizePreferenceStrength(body.preferenceStrength);
+    const preferenceNote = nullableString(body.preferenceNote);
     const singleContact = names.length === 1;
 
     await prisma.$transaction(async (tx) => {
@@ -70,6 +74,9 @@ export async function POST(request: Request) {
           poolType: "CORE",
           phone: singleContact ? nullableString(body.phone) : null,
           email: singleContact ? nullableString(body.email) : null,
+          preferredShiftType,
+          preferenceStrength,
+          preferenceNote,
           note,
           active
         })),
@@ -77,7 +84,7 @@ export async function POST(request: Request) {
       });
       await tx.staffProfile.updateMany({
         where: { unitId: unit.id, displayName: { in: names } },
-        data: { active, note }
+        data: { active, note, preferredShiftType, preferenceStrength, preferenceNote }
       });
       const profiles = await tx.staffProfile.findMany({
         where: { unitId: unit.id, displayName: { in: names } },
@@ -108,7 +115,7 @@ export async function POST(request: Request) {
       unitId: unit.id,
       action: "UPSERT_STAFF_PROFILE",
       targetType: "StaffProfile",
-      afterJson: { names, tagIds, count: createdOrUpdated.length },
+      afterJson: { names, tagIds, count: createdOrUpdated.length, preferredShiftType, preferenceStrength },
       request
     });
 

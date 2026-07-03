@@ -13,6 +13,9 @@ export type ApiDoctor = {
   name: string;
   doctorType: DoctorType;
   active?: boolean;
+  preferredShiftType?: string;
+  preferenceStrength?: string;
+  preferenceNote?: string | null;
   tagSnapshotJson?: unknown;
   policySnapshotJson?: unknown;
   createdAt: string;
@@ -98,14 +101,19 @@ export type DoctorStats = {
   morningAssignments: number;
   afternoonAssignments: number;
   weekendAssignments: number;
+  weekendDayAssignments?: number;
   holidayAssignments?: number;
+  holidayDayAssignments?: number;
   makeupWorkdayAssignments?: number;
   customRestAssignments?: number;
   customSpecialAssignments?: number;
   weekendNightAssignments?: number;
   holidayNightAssignments?: number;
+  postNightAssignments?: number;
   saturdayNightAssignments?: number;
   sundayNightAssignments?: number;
+  goldenNightAssignments?: number;
+  highBurdenNightAssignments?: number;
   peakAssignments: number;
   maxConsecutiveDays: number;
   hasConsecutiveWork: boolean;
@@ -121,6 +129,12 @@ export type DoctorStats = {
   backupAssignments?: number;
   workloadTotal?: number;
   targetWorkloadFactor?: number;
+  manualOverrideAssignments?: number;
+  preferredShiftType?: string;
+  preferenceStrength?: string;
+  preferenceNote?: string | null;
+  preferenceLabel?: string;
+  preferenceSatisfaction?: string;
   assignments: Array<{
     id: string;
     date: string;
@@ -149,6 +163,16 @@ export type ScheduleStats = {
     hasConsecutiveWork: boolean;
     hasUnavailableConflicts: boolean;
     hasObviousImbalance: boolean;
+    fairnessSpreads?: {
+      totalShiftSpread: number;
+      workloadSpread: number;
+      nightShiftSpread: number;
+      postNightSpread: number;
+      weekendDaySpread: number;
+      weekendNightSpread: number;
+      holidayDaySpread: number;
+      holidayNightSpread: number;
+    };
     conflictCount: number;
   };
   warnings: string[];

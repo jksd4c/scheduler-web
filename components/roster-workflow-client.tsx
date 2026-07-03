@@ -2,6 +2,7 @@
 
 import { Ban, Copy, History, Link2, Loader2, Plus, RefreshCw, Save, ShieldCheck, UserCheck, UserX } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
+import { PREFERRED_SHIFT_TYPE_LABELS, PREFERENCE_STRENGTH_LABELS, preferenceLabel } from "@/lib/preferences";
 
 type TaskOption = { id: string; name?: string | null; startDate?: string; endDate?: string; weekStartDate: string; weekEndDate: string; unit?: { name: string } | null };
 type Pool = { id: string; name: string; poolType: string; active: boolean; startDate?: string | null; endDate?: string | null };
@@ -45,6 +46,9 @@ type MemberFeedback = {
   rosterEntryId?: string | null;
   title: string | null;
   message: string | null;
+  preferredShiftType: string;
+  preferenceStrength: string;
+  preferenceNote: string | null;
   status: string;
   effective: boolean;
   anomalyStatus: string | null;
@@ -552,37 +556,75 @@ export function FeedbackReviewClient() {
   const [items, setItems] = useState<MemberFeedback[]>([]);
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [busyId, setBusyId] = useState("");
+  const [preferenceDrafts, setPreferenceDrafts] = useState<Record<string, { preferredShiftType: string; preferenceStrength: string; preferenceNote: string }>>({});
   async function load() {
     const data = await fetchJson("/api/feedback-review");
-    setItems(data.feedback ?? []);
+    const feedback = data.feedback ?? [];
+    setItems(feedback);
     setUsers(data.users ?? []);
+    setPreferenceDrafts(
+      Object.fromEntries(
+        feedback.map((item: MemberFeedback) => [
+          item.id,
+          {
+            preferredShiftType: item.preferredShiftType ?? "NONE",
+            preferenceStrength: item.preferenceStrength ?? "NORMAL",
+            preferenceNote: item.preferenceNote ?? ""
+          }
+        ])
+      )
+    );
   }
   useEffect(() => { void load(); }, []);
   async function act(id: string, action: string) {
     setBusyId(id);
     try {
-      await patchJson(`/api/feedback-review/${id}`, { action });
+      await patchJson(`/api/feedback-review/${id}`, { action, ...(preferenceDrafts[id] ?? {}) });
       await load();
     } finally {
       setBusyId("");
     }
   }
+  function updatePreferenceDraft(id: string, patch: Partial<{ preferredShiftType: string; preferenceStrength: string; preferenceNote: string }>) {
+    setPreferenceDrafts((previous) => ({
+      ...previous,
+      [id]: {
+        preferredShiftType: previous[id]?.preferredShiftType ?? "NONE",
+        preferenceStrength: previous[id]?.preferenceStrength ?? "NORMAL",
+        preferenceNote: previous[id]?.preferenceNote ?? "",
+        ...patch
+      }
+    }));
+  }
   const usersById = new Map(users.map((user) => [user.id, user]));
   return (
     <section className="space-y-5">
-      <Header title="成员反馈审核" desc="身份未确认或异常反馈不会自动进入排班。审核通过后才作为硬约束生效。" />
+      <Header title="成员反馈审核" desc="身份未确认或异常反馈不会自动进入排班。审核通过后，不可排作为硬约束生效，偏好写入人员设置并只作为软约束。" />
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
         <div className="table-scroll">
-          <table className="min-w-[980px] w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-600"><tr>{["成员", "手机号", "不可排", "留言", "状态", "是否生效", "异常", "操作"].map((h) => <th key={h} className="border-b border-slate-200 px-3 py-3 font-medium">{h}</th>)}</tr></thead>
+          <table className="min-w-[1240px] w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600"><tr>{["成员", "手机号", "不可排", "留言", "排班偏好", "状态", "是否生效", "异常", "操作"].map((h) => <th key={h} className="border-b border-slate-200 px-3 py-3 font-medium">{h}</th>)}</tr></thead>
             <tbody>{items.length ? items.map((item) => {
               const user = usersById.get(item.userId);
+              const draft = preferenceDrafts[item.id] ?? { preferredShiftType: item.preferredShiftType ?? "NONE", preferenceStrength: item.preferenceStrength ?? "NORMAL", preferenceNote: item.preferenceNote ?? "" };
               return (
                 <tr key={item.id} className="align-top">
                   <td className="border-b border-slate-100 px-3 py-3">{user?.displayName || user?.username || "成员反馈"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{user?.phone || "-"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{item.unavailableTimes?.map((u) => `${new Date(u.date).toISOString().slice(0, 10)} ${u.timeSlot}`).join("；") || "-"}</td>
                   <td className="border-b border-slate-100 px-3 py-3 max-w-xs whitespace-pre-wrap">{item.message || "-"}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">
+                    <div className="mb-2 text-xs text-slate-500">成员提交：{preferenceLabel(item.preferredShiftType, item.preferenceStrength)}</div>
+                    <div className="grid gap-1">
+                      <select value={draft.preferredShiftType} onChange={(event) => updatePreferenceDraft(item.id, { preferredShiftType: event.target.value })} className="focus-ring rounded-md border border-slate-300 px-2 py-1 text-xs">
+                        {Object.entries(PREFERRED_SHIFT_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                      <select value={draft.preferenceStrength} onChange={(event) => updatePreferenceDraft(item.id, { preferenceStrength: event.target.value })} className="focus-ring rounded-md border border-slate-300 px-2 py-1 text-xs">
+                        {Object.entries(PREFERENCE_STRENGTH_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                      <input value={draft.preferenceNote} onChange={(event) => updatePreferenceDraft(item.id, { preferenceNote: event.target.value })} className="focus-ring rounded-md border border-slate-300 px-2 py-1 text-xs" placeholder={item.preferenceNote || "偏好备注"} />
+                    </div>
+                  </td>
                   <td className="border-b border-slate-100 px-3 py-3">{statusLabels[item.status] ?? item.status}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{item.effective ? "是" : "否"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{item.anomalyStatus || "无"}</td>
@@ -594,7 +636,7 @@ export function FeedbackReviewClient() {
                   </td>
                 </tr>
               );
-            }) : <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-500">暂无成员反馈</td></tr>}</tbody>
+            }) : <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">暂无成员反馈</td></tr>}</tbody>
           </table>
         </div>
       </div>

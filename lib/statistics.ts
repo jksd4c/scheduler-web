@@ -1,5 +1,6 @@
 import { isDoctorUnavailable, type UnavailableRecord } from "@/lib/availability";
-import { getDateRangeDates, getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
+import { addDays, getDateRangeDates, getWeekDates, getWeekdayLabel, toDateKey } from "@/lib/date-utils";
+import { normalizePreferredShiftType, normalizePreferenceStrength, preferenceLabel, preferenceSatisfaction } from "@/lib/preferences";
 import {
   getExpectedAssignmentCountFromRequirements,
   isPeakDay,
@@ -20,6 +21,9 @@ export type DoctorLike = {
   doctorType: DoctorTypeValue;
   tagSnapshotJson?: unknown;
   policySnapshotJson?: unknown;
+  preferredShiftType?: string | null;
+  preferenceStrength?: string | null;
+  preferenceNote?: string | null;
 };
 
 export type AssignmentLike = {
@@ -61,14 +65,19 @@ export type DoctorScheduleStats = {
   morningAssignments: number;
   afternoonAssignments: number;
   weekendAssignments: number;
+  weekendDayAssignments: number;
   holidayAssignments: number;
+  holidayDayAssignments: number;
   makeupWorkdayAssignments: number;
   customRestAssignments: number;
   customSpecialAssignments: number;
   weekendNightAssignments: number;
   holidayNightAssignments: number;
+  postNightAssignments: number;
   saturdayNightAssignments: number;
   sundayNightAssignments: number;
+  goldenNightAssignments: number;
+  highBurdenNightAssignments: number;
   peakAssignments: number;
   maxConsecutiveDays: number;
   hasConsecutiveWork: boolean;
@@ -85,6 +94,11 @@ export type DoctorScheduleStats = {
   workloadTotal: number;
   targetWorkloadFactor: number;
   manualOverrideAssignments: number;
+  preferredShiftType: string;
+  preferenceStrength: string;
+  preferenceNote?: string | null;
+  preferenceLabel: string;
+  preferenceSatisfaction: string;
   assignments: DoctorAssignmentSummary[];
 };
 
@@ -100,6 +114,16 @@ export type OverallScheduleStats = {
   hasConsecutiveWork: boolean;
   hasUnavailableConflicts: boolean;
   hasObviousImbalance: boolean;
+  fairnessSpreads: {
+    totalShiftSpread: number;
+    workloadSpread: number;
+    nightShiftSpread: number;
+    postNightSpread: number;
+    weekendDaySpread: number;
+    weekendNightSpread: number;
+    holidayDaySpread: number;
+    holidayNightSpread: number;
+  };
   conflictCount: number;
 };
 
@@ -148,14 +172,19 @@ export function calculateScheduleStats(input: {
       morningAssignments: 0,
       afternoonAssignments: 0,
       weekendAssignments: 0,
+      weekendDayAssignments: 0,
       holidayAssignments: 0,
+      holidayDayAssignments: 0,
       makeupWorkdayAssignments: 0,
       customRestAssignments: 0,
       customSpecialAssignments: 0,
       weekendNightAssignments: 0,
       holidayNightAssignments: 0,
+      postNightAssignments: 0,
       saturdayNightAssignments: 0,
       sundayNightAssignments: 0,
+      goldenNightAssignments: 0,
+      highBurdenNightAssignments: 0,
       peakAssignments: 0,
       maxConsecutiveDays: 0,
       hasConsecutiveWork: false,
@@ -172,6 +201,11 @@ export function calculateScheduleStats(input: {
       workloadTotal: 0,
       targetWorkloadFactor: policy.workloadFactor,
       manualOverrideAssignments: 0,
+      preferredShiftType: normalizePreferredShiftType(doctor.preferredShiftType),
+      preferenceStrength: normalizePreferenceStrength(doctor.preferenceStrength),
+      preferenceNote: doctor.preferenceNote ?? null,
+      preferenceLabel: preferenceLabel(doctor.preferredShiftType, doctor.preferenceStrength),
+      preferenceSatisfaction: "无偏好",
       assignments: []
     });
   }
@@ -221,8 +255,13 @@ export function calculateScheduleStats(input: {
       if (effectiveDateType === "PUBLIC_HOLIDAY") stats.holidayNightAssignments += 1;
       if (assignment.weekday === 6 && effectiveDateType !== "MAKEUP_WORKDAY") stats.saturdayNightAssignments += 1;
       if (assignment.weekday === 7 && effectiveDateType !== "MAKEUP_WORKDAY") stats.sundayNightAssignments += 1;
+      if (causesPostNightRecovery(dateKey, specialDateTypes)) stats.postNightAssignments += 1;
+      if (assignment.weekday === 4 && causesPostNightRecovery(dateKey, specialDateTypes)) stats.goldenNightAssignments += 1;
+      if (effectiveDateType === "WEEKEND" || effectiveDateType === "PUBLIC_HOLIDAY") stats.highBurdenNightAssignments += 1;
     } else {
       stats.dayShiftAssignments += 1;
+      if (effectiveDateType === "WEEKEND") stats.weekendDayAssignments += 1;
+      if (effectiveDateType === "PUBLIC_HOLIDAY") stats.holidayDayAssignments += 1;
     }
     if (category === SHIFT_TYPE_CATEGORY.FIRST_LINE) stats.firstLineAssignments += 1;
     if (category === SHIFT_TYPE_CATEGORY.SECOND_LINE) stats.secondLineAssignments += 1;
@@ -274,6 +313,13 @@ export function calculateScheduleStats(input: {
       }
       return a.roomNumber - b.roomNumber;
     });
+    stats.preferenceLabel = preferenceLabel(stats.preferredShiftType, stats.preferenceStrength);
+    stats.preferenceSatisfaction = preferenceSatisfaction({
+      preferredShiftType: stats.preferredShiftType,
+      preferenceStrength: stats.preferenceStrength,
+      dayShiftAssignments: stats.dayShiftAssignments,
+      nightShiftAssignments: stats.nightShiftAssignments
+    });
   }
 
   const perDoctor = Array.from(perDoctorMap.values()).sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN"));
@@ -283,13 +329,32 @@ export function calculateScheduleStats(input: {
   const doctorCount = input.doctors.length;
   const maxAssignments = totals.length ? Math.max(...totals) : 0;
   const minAssignments = totals.length ? Math.min(...totals) : 0;
+  const fairnessSpreads = {
+    totalShiftSpread: spread(perDoctor.map((item) => item.totalAssignments)),
+    workloadSpread: spread(perDoctor.map((item) => item.workloadTotal)),
+    nightShiftSpread: spread(perDoctor.map((item) => item.nightShiftAssignments)),
+    postNightSpread: spread(perDoctor.map((item) => item.postNightAssignments)),
+    weekendDaySpread: spread(perDoctor.map((item) => item.weekendDayAssignments)),
+    weekendNightSpread: spread(perDoctor.map((item) => item.weekendNightAssignments)),
+    holidayDaySpread: spread(perDoctor.map((item) => item.holidayDayAssignments)),
+    holidayNightSpread: spread(perDoctor.map((item) => item.holidayNightAssignments))
+  };
   const missingFromConflicts = input.conflicts
     .filter((item) => item.conflictType === "UNFILLED")
     .reduce((sum, item) => sum + (item.missingCount ?? 0), 0);
   const unfilledAssignments = missingFromConflicts || Math.max(0, expectedAssignments - actualAssignments);
   const hasUnavailableConflicts = perDoctor.some((item) => item.unavailableConflictCount > 0);
   const hasConsecutiveWork = perDoctor.some((item) => item.hasConsecutiveWork);
-  const hasObviousImbalance = doctorCount > 1 && maxAssignments - minAssignments >= 3;
+  const hasObviousImbalance =
+    doctorCount > 1 &&
+    (fairnessSpreads.totalShiftSpread >= 2 ||
+      fairnessSpreads.workloadSpread >= 2 ||
+      fairnessSpreads.nightShiftSpread >= 2 ||
+      fairnessSpreads.postNightSpread >= 2 ||
+      fairnessSpreads.weekendDaySpread >= 2 ||
+      fairnessSpreads.weekendNightSpread >= 2 ||
+      fairnessSpreads.holidayDaySpread >= 2 ||
+      fairnessSpreads.holidayNightSpread >= 2);
   const identityGroups = buildIdentityGroups(perDoctor);
 
   const warnings: string[] = [];
@@ -303,7 +368,15 @@ export function calculateScheduleStats(input: {
     warnings.push("存在连续上班人员，建议人工复核。");
   }
   if (hasObviousImbalance) {
-    warnings.push(`人员工作量不均衡，最高 ${maxAssignments} 次，最低 ${minAssignments} 次。`);
+    warnings.push("当前排班存在明显不均衡，建议重新生成或手动调整。");
+    if (fairnessSpreads.totalShiftSpread >= 2) warnings.push(`总班次数差异 ${fairnessSpreads.totalShiftSpread} 次，最高 ${maxAssignments} 次，最低 ${minAssignments} 次。`);
+    if (fairnessSpreads.workloadSpread >= 2) warnings.push(`总工作量差异 ${fairnessSpreads.workloadSpread.toFixed(1)}。`);
+    if (fairnessSpreads.nightShiftSpread >= 2) warnings.push(`夜班次数差异 ${fairnessSpreads.nightShiftSpread} 次。`);
+    if (fairnessSpreads.postNightSpread >= 2) warnings.push(`下夜班次数差异 ${fairnessSpreads.postNightSpread} 次。`);
+    if (fairnessSpreads.weekendDaySpread >= 2) warnings.push(`周末白班次数差异 ${fairnessSpreads.weekendDaySpread} 次。`);
+    if (fairnessSpreads.weekendNightSpread >= 2) warnings.push(`周末夜班次数差异 ${fairnessSpreads.weekendNightSpread} 次。`);
+    if (fairnessSpreads.holidayDaySpread >= 2) warnings.push(`节假日白班次数差异 ${fairnessSpreads.holidayDaySpread} 次。`);
+    if (fairnessSpreads.holidayNightSpread >= 2) warnings.push(`节假日夜班次数差异 ${fairnessSpreads.holidayNightSpread} 次。`);
   }
 
   return {
@@ -320,6 +393,7 @@ export function calculateScheduleStats(input: {
       hasConsecutiveWork,
       hasUnavailableConflicts,
       hasObviousImbalance,
+      fairnessSpreads,
       conflictCount: input.conflicts.length
     },
     warnings,
@@ -384,6 +458,23 @@ function getEffectiveDateType(dateKey: string, weekday: number, specialDateTypes
   const specialType = normalizeSpecialDateType(specialDateTypes.get(dateKey));
   if (specialType) return specialType;
   return isWeekend(weekday) ? "WEEKEND" : "WORKDAY";
+}
+
+function causesPostNightRecovery(nightDateKey: string, specialDateTypes: Map<string, string>) {
+  const nextDateKey = toDateKey(addDays(nightDateKey, 1));
+  const nextWeekday = weekdayFromDateKey(nextDateKey);
+  const nextType = getEffectiveDateType(nextDateKey, nextWeekday, specialDateTypes);
+  return nextType === "WORKDAY" || nextType === "MAKEUP_WORKDAY";
+}
+
+function weekdayFromDateKey(dateKey: string) {
+  const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+function spread(values: number[]) {
+  if (!values.length) return 0;
+  return Number((Math.max(...values) - Math.min(...values)).toFixed(2));
 }
 
 function normalizeSpecialDateType(value?: string | null) {

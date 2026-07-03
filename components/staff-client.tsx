@@ -1,7 +1,8 @@
 "use client";
 
-import { Save, UserPlus } from "lucide-react";
+import { Loader2, Save, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
+import { PREFERRED_SHIFT_TYPE_LABELS, PREFERENCE_STRENGTH_LABELS, preferenceLabel } from "@/lib/preferences";
 
 type Tag = { id: string; name: string; category: string; color: string | null };
 type Staff = {
@@ -11,13 +12,28 @@ type Staff = {
   email: string | null;
   note: string | null;
   active: boolean;
+  preferredShiftType: string;
+  preferenceStrength: string;
+  preferenceNote: string | null;
   tags: Array<{ staffTag: Tag }>;
   tagSnapshot: Tag[];
   eligibilitySummary: string;
 };
 
 function emptyForm() {
-  return { id: "", displayName: "", phone: "", email: "", note: "", active: true, namesText: "", tagIds: [] as string[] };
+  return {
+    id: "",
+    displayName: "",
+    phone: "",
+    email: "",
+    note: "",
+    active: true,
+    namesText: "",
+    tagIds: [] as string[],
+    preferredShiftType: "NONE",
+    preferenceStrength: "NORMAL",
+    preferenceNote: ""
+  };
 }
 
 export function StaffClient() {
@@ -67,7 +83,10 @@ export function StaffClient() {
             email: form.email,
             note: form.note,
             active: form.active,
-            tagIds: form.tagIds
+            tagIds: form.tagIds,
+            preferredShiftType: form.preferredShiftType,
+            preferenceStrength: form.preferenceStrength,
+            preferenceNote: form.preferenceNote
           }
         : {
             displayName: form.displayName,
@@ -76,7 +95,10 @@ export function StaffClient() {
             email: form.email,
             note: form.note,
             active: form.active,
-            tagIds: form.tagIds
+            tagIds: form.tagIds,
+            preferredShiftType: form.preferredShiftType,
+            preferenceStrength: form.preferenceStrength,
+            preferenceNote: form.preferenceNote
           };
       const response = await fetch(editing ? `/api/staff/${form.id}` : "/api/staff", {
         method: editing ? "PATCH" : "POST",
@@ -87,7 +109,7 @@ export function StaffClient() {
       if (!response.ok) throw new Error(data.message ?? "保存失败");
       setForm(emptyForm());
       await load();
-      setMessage("已保存人员");
+      setMessage("已保存人员设置。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败");
     } finally {
@@ -104,7 +126,10 @@ export function StaffClient() {
       note: item.note ?? "",
       active: item.active,
       namesText: "",
-      tagIds: item.tags.map((tag) => tag.staffTag.id)
+      tagIds: item.tags.map((tag) => tag.staffTag.id),
+      preferredShiftType: item.preferredShiftType ?? "NONE",
+      preferenceStrength: item.preferenceStrength ?? "NORMAL",
+      preferenceNote: item.preferenceNote ?? ""
     });
   }
 
@@ -113,10 +138,10 @@ export function StaffClient() {
       {loading ? <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">正在加载人员库...</div> : null}
       <div>
         <h2 className="text-2xl font-semibold text-slate-950">人员管理</h2>
-        <p className="mt-1 text-sm text-slate-600">维护本病区人员库，并给人员绑定多个身份/资格。创建排班任务时可从人员库选择参与人员。</p>
+        <p className="mt-1 text-sm text-slate-600">维护本病区人员库、身份资格和排班偏好。偏好只在公平范围内起作用。</p>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
+      <div className="grid gap-5 xl:grid-cols-[400px_1fr]">
         <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-table">
           <h3 className="flex items-center gap-2 font-semibold text-slate-950">
             <UserPlus size={18} />
@@ -127,13 +152,27 @@ export function StaffClient() {
             {!editing ? (
               <textarea className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={5} placeholder="批量导入：一行一个姓名，也支持逗号、顿号、空格分隔" value={form.namesText} onChange={(event) => setForm({ ...form, namesText: event.target.value })} />
             ) : null}
-            <input className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="手机（可选）" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
-            <input className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="邮箱（可选）" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+            <input className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="手机，可选" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+            <input className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="邮箱，可选" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
             <textarea className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" rows={3} placeholder="备注" value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} />
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} />
               启用
             </label>
+          </div>
+
+          <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <h4 className="text-sm font-semibold text-slate-800">排班偏好</h4>
+            <p className="mt-1 text-xs text-slate-500">偏好不是硬约束。系统仍优先保证总班次、工作量、夜班、周末和节假日公平。</p>
+            <div className="mt-3 grid gap-2">
+              <select className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.preferredShiftType} onChange={(event) => setForm({ ...form, preferredShiftType: event.target.value })}>
+                {Object.entries(PREFERRED_SHIFT_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <select className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm" value={form.preferenceStrength} onChange={(event) => setForm({ ...form, preferenceStrength: event.target.value })}>
+                {Object.entries(PREFERENCE_STRENGTH_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <input className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="偏好备注，可选" value={form.preferenceNote} onChange={(event) => setForm({ ...form, preferenceNote: event.target.value })} />
+            </div>
           </div>
 
           <div className="mt-5">
@@ -150,7 +189,7 @@ export function StaffClient() {
           <div className="mt-5 flex items-center justify-between gap-3">
             <button type="button" onClick={() => setForm(emptyForm())} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm">清空</button>
             <button disabled={busy || (!form.displayName.trim() && !form.namesText.trim())} onClick={() => void submit()} className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300">
-              <Save size={16} />
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
               {busy ? "保存中..." : "保存人员"}
             </button>
           </div>
@@ -158,11 +197,12 @@ export function StaffClient() {
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-table">
-          <table className="min-w-full text-left text-sm">
+          <table className="min-w-[980px] w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-600">
               <tr>
                 <th className="px-3 py-3 font-medium">姓名</th>
                 <th className="px-3 py-3 font-medium">身份/资格</th>
+                <th className="px-3 py-3 font-medium">排班偏好</th>
                 <th className="px-3 py-3 font-medium">最终资格摘要</th>
                 <th className="px-3 py-3 font-medium">状态</th>
                 <th className="px-3 py-3 font-medium">操作</th>
@@ -181,6 +221,10 @@ export function StaffClient() {
                         <span key={tag.id} className="rounded-full px-2 py-0.5 text-xs text-white" style={{ backgroundColor: tag.color ?? "#64748b" }}>{tag.name}</span>
                       ))}
                     </div>
+                  </td>
+                  <td className="border-t border-slate-100 px-3 py-3 text-slate-600">
+                    <div>{preferenceLabel(item.preferredShiftType, item.preferenceStrength)}</div>
+                    {item.preferenceNote ? <div className="mt-1 text-xs text-slate-400">{item.preferenceNote}</div> : null}
                   </td>
                   <td className="border-t border-slate-100 px-3 py-3 text-slate-600">{item.eligibilitySummary}</td>
                   <td className="border-t border-slate-100 px-3 py-3">{item.active ? "启用" : "停用"}</td>

@@ -1731,18 +1731,23 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     return (
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
         <div className="table-scroll">
-          <table className="min-w-[1120px] w-full border-collapse text-sm">
+          <table className="min-w-[1500px] w-full border-collapse text-sm">
             <thead className="bg-slate-50 text-left text-slate-600">
               <tr>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">人员</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">总班次</th>
-                <th className="border-b border-slate-200 px-3 py-3 font-medium">上午</th>
-                <th className="border-b border-slate-200 px-3 py-3 font-medium">下午</th>
-                <th className="border-b border-slate-200 px-3 py-3 font-medium">周末</th>
-                <th className="border-b border-slate-200 px-3 py-3 font-medium">节假日</th>
-                <th className="border-b border-slate-200 px-3 py-3 font-medium">调休</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">总工作量</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">白班</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">夜班</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">下夜班</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">周末白班</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">周末夜班</th>
-                <th className="border-b border-slate-200 px-3 py-3 font-medium">高峰</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">节假日白班</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">节假日夜班</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">黄金夜班</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">高负担夜班</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">偏好</th>
+                <th className="border-b border-slate-200 px-3 py-3 font-medium">偏好满足情况</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">连续</th>
                 <th className="border-b border-slate-200 px-3 py-3 font-medium">安排明细</th>
               </tr>
@@ -1765,13 +1770,18 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
                     {doctor.eligibilitySummary ? <div className="mt-1 max-w-xs text-xs text-slate-500">{doctor.eligibilitySummary}</div> : null}
                   </td>
                   <td className="border-b border-slate-100 px-3 py-3 font-semibold">{doctor.totalAssignments}</td>
-                  <td className="border-b border-slate-100 px-3 py-3">{doctor.morningAssignments}</td>
-                  <td className="border-b border-slate-100 px-3 py-3">{doctor.afternoonAssignments}</td>
-                  <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendAssignments}</td>
-                  <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayAssignments ?? 0}</td>
-                  <td className="border-b border-slate-100 px-3 py-3">{doctor.makeupWorkdayAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.workloadTotal ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.dayShiftAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.nightShiftAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.postNightAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendDayAssignments ?? 0}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendNightAssignments ?? 0}</td>
-                  <td className="border-b border-slate-100 px-3 py-3">{doctor.peakAssignments}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayDayAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayNightAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.goldenNightAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.highBurdenNightAssignments ?? 0}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.preferenceLabel ?? "无偏好"}</td>
+                  <td className="border-b border-slate-100 px-3 py-3">{doctor.preferenceSatisfaction ?? "无偏好"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{doctor.maxConsecutiveDays} 天</td>
                   <td className="border-b border-slate-100 px-3 py-3">
                     {doctor.assignments.length ? (

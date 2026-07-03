@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { dateFromKey } from "@/lib/date-utils";
+import { normalizePreferredShiftType, normalizePreferenceStrength, PREFERRED_SHIFT_TYPE } from "@/lib/preferences";
 import { prisma } from "@/lib/prisma";
 import { evaluateFeedbackStatus, JOIN_REVIEW_STATUS, ROSTER_STATUS, normalizeTimeSlot } from "@/lib/roster-workflow";
 
@@ -41,6 +42,10 @@ export async function POST(request: Request) {
       .filter(Boolean) as Array<{ date: string; timeSlot: string; reason: string | null }>;
     const message = String(body.message ?? "").trim();
     const title = String(body.title ?? "").trim() || "成员排班反馈";
+    const preferredShiftType = normalizePreferredShiftType(body.preferredShiftType);
+    const preferenceStrength = normalizePreferenceStrength(body.preferenceStrength);
+    const preferenceNote = String(body.preferenceNote ?? "").trim() || null;
+    const hasPreference = preferredShiftType !== PREFERRED_SHIFT_TYPE.NONE;
     const periodDays = await getPeriodDays(claim.scheduleTaskId);
     const rosterEntry = claim.rosterEntryId
       ? await prisma.rosterEntry.findUnique({
@@ -58,6 +63,8 @@ export async function POST(request: Request) {
       identityConfirmed,
       hasMessage: Boolean(message)
     });
+    const status = hasPreference && identityConfirmed ? "NEEDS_REVIEW" : decision.status;
+    const effective = hasPreference ? false : decision.effective;
     const feedback = await prisma.memberFeedback.create({
       data: {
         userId: user.id,
@@ -69,9 +76,12 @@ export async function POST(request: Request) {
         unitId: claim.unitId,
         title,
         message,
+        preferredShiftType,
+        preferenceStrength,
+        preferenceNote,
         canWorkShiftTypeIds: Array.isArray(body.canWorkShiftTypeIds) ? body.canWorkShiftTypeIds.map(String).filter(Boolean) : [],
-        status: decision.status,
-        effective: decision.effective,
+        status,
+        effective,
         anomalyStatus: decision.anomalyStatus,
         unavailableTimes: { create: records.map((item) => ({ date: dateFromKey(item.date), timeSlot: item.timeSlot, reason: item.reason })) }
       },
@@ -85,7 +95,7 @@ export async function POST(request: Request) {
       action: "SUBMIT_MEMBER_FEEDBACK",
       targetType: "MemberFeedback",
       targetId: feedback.id,
-      afterJson: { status: feedback.status, effective: feedback.effective, unavailableCount: records.length },
+      afterJson: { status: feedback.status, effective: feedback.effective, unavailableCount: records.length, preferredShiftType, preferenceStrength },
       request
     });
     return NextResponse.json({ feedback }, { status: 201 });
