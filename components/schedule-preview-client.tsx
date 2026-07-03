@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Download, Loader2, Lock, RefreshCw, Save, Unlock, UsersRound, Wand2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, Loader2, Lock, Save, Unlock, UsersRound, Wand2, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { TASK_SCHEDULE_MODE_LABELS } from "@/lib/schedule-rules";
@@ -63,9 +63,20 @@ type PreviewData = {
   };
 };
 
+type CalendarSlot = {
+  key: string;
+  dateKey: string;
+  dayNumber: number;
+  day?: CalendarDay;
+  inMonth: boolean;
+  isToday: boolean;
+};
+
+const WEEK_HEADERS = ["日", "一", "二", "三", "四", "五", "六"];
+
 const dateTypeClass: Record<string, string> = {
   WORKDAY: "bg-white",
-  WEEKEND: "bg-sky-50",
+  WEEKEND: "bg-slate-50",
   HOLIDAY: "bg-red-50",
   PUBLIC_HOLIDAY: "bg-red-50",
   MAKEUP_WORKDAY: "bg-orange-50",
@@ -74,29 +85,6 @@ const dateTypeClass: Record<string, string> = {
   CUSTOM_SPECIAL_DAY: "bg-yellow-50",
   CUSTOM_SPECIAL: "bg-yellow-50"
 };
-
-function buildMonthSummary(month: string, days: CalendarDay[]) {
-  let totalAssignments = 0;
-  let nightAssignments = 0;
-  let weekendAssignments = 0;
-  let holidayAssignments = 0;
-  let conflictCount = 0;
-  let unfilledAssignments = 0;
-  for (const day of days) {
-    const isWeekend = day.dateType === "WEEKEND" || day.weekdayLabel === "周六" || day.weekdayLabel === "周日";
-    const isHoliday = day.dateType === "HOLIDAY" || day.dateType === "PUBLIC_HOLIDAY" || day.dateType === "CUSTOM_REST_DAY" || day.dateType === "CUSTOM_REST";
-    conflictCount += day.conflicts.length;
-    for (const cell of day.cells) {
-      const assigned = cell.assignments.length;
-      totalAssignments += assigned;
-      unfilledAssignments += Math.max(0, cell.requiredDoctors - assigned);
-      if (cell.label.includes("夜") || cell.timeSlotLabel.includes("夜")) nightAssignments += assigned;
-      if (isWeekend) weekendAssignments += assigned;
-      if (isHoliday) holidayAssignments += assigned;
-    }
-  }
-  return { month, totalAssignments, nightAssignments, weekendAssignments, holidayAssignments, conflictCount, unfilledAssignments };
-}
 
 export function SchedulePreviewClient({ taskId }: { taskId: string }) {
   const [preview, setPreview] = useState<PreviewData | null>(null);
@@ -133,8 +121,9 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
       const key = day.dateKey.slice(0, 7);
       groups.set(key, [...(groups.get(key) ?? []), day]);
     }
-    return Array.from(groups.entries());
+    return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [preview]);
+
   const useMonthOverview = useMemo(
     () => ["QUARTER", "HALF_YEAR", "YEAR"].includes(preview?.task.periodType ?? ""),
     [preview?.task.periodType]
@@ -156,9 +145,9 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
     ? activeMonth
       ? monthGroups.filter(([month]) => month === activeMonth)
       : []
-    : monthGroups.length > 2 && activeMonth
+    : activeMonth
       ? monthGroups.filter(([month]) => month === activeMonth)
-      : monthGroups;
+      : monthGroups.slice(0, 1);
 
   function openEdit(cell: Cell) {
     setEditingCell(cell);
@@ -262,7 +251,7 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
           <Link href={`/tasks/${taskId}`} className="text-sm text-slate-600 hover:text-slate-950">返回任务详情</Link>
           <h2 className="mt-2 text-2xl font-semibold text-slate-950">预览与编辑</h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            预览模式用于在网页中直接检查和修改排班结果，确认后再导出或发布，避免反复导入导出。未确认成员的反馈不会进入自动排班。
+            预览以真实日历展示。点击某天的班次短条即可修改人员，确认后再保存为正式排班或导出。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -297,77 +286,34 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
 
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <Legend className="bg-white" label="普通工作日" />
-            <Legend className="bg-sky-50" label="普通周末" />
-            <Legend className="bg-red-50" label="法定节假日预留" />
-            <Legend className="bg-orange-50" label="调休上班预留" />
-            <Legend className="bg-purple-50" label="自定义休息预留" />
-            <Legend className="bg-yellow-50" label="特殊日期预留" />
+            <Legend className="bg-slate-50" label="周末" />
+            <Legend className="bg-red-50" label="法定节假日" />
+            <Legend className="bg-orange-50" label="调休上班日" />
+            <Legend className="bg-purple-50" label="自定义休息日" />
+            <Legend className="bg-yellow-50" label="自定义特殊日" />
           </div>
 
           <div className="space-y-8">
             {useMonthOverview && !activeMonth ? (
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-950">月份总览</h3>
-                  <p className="mt-1 text-sm text-slate-500">长期周期先按月份查看概览，点击月份后进入该月日历明细。</p>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {monthSummaries.map((summary) => (
-                    <button
-                      type="button"
-                      key={summary.month}
-                      onClick={() => setActiveMonth(summary.month)}
-                      className="focus-ring rounded-lg border border-slate-200 bg-white p-4 text-left shadow-table hover:border-hospital-green"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="text-lg font-semibold text-slate-950">{summary.month}</div>
-                        {summary.conflictCount || summary.unfilledAssignments ? (
-                          <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">需处理</span>
-                        ) : (
-                          <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs text-hospital-green">正常</span>
-                        )}
-                      </div>
-                      <dl className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">总班次数</dt><dd className="font-semibold text-slate-950">{summary.totalAssignments}</dd></div>
-                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">夜班数</dt><dd className="font-semibold text-slate-950">{summary.nightAssignments}</dd></div>
-                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">周末班</dt><dd className="font-semibold text-slate-950">{summary.weekendAssignments}</dd></div>
-                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">节假日班</dt><dd className="font-semibold text-slate-950">{summary.holidayAssignments}</dd></div>
-                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">冲突数</dt><dd className={summary.conflictCount ? "font-semibold text-red-700" : "font-semibold text-slate-950"}>{summary.conflictCount}</dd></div>
-                        <div className="rounded-md bg-slate-50 p-2"><dt className="text-xs text-slate-500">未排满</dt><dd className={summary.unfilledAssignments ? "font-semibold text-red-700" : "font-semibold text-slate-950"}>{summary.unfilledAssignments}</dd></div>
-                      </dl>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <MonthOverview summaries={monthSummaries} onOpen={setActiveMonth} />
             ) : null}
 
-            {!useMonthOverview && monthGroups.length > 2 ? (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-3">
-                <span className="text-sm font-medium text-slate-700">按月查看</span>
-                <select value={activeMonth} onChange={(event) => setActiveMonth(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm">
-                  {monthGroups.map(([month]) => <option key={month} value={month}>{month}</option>)}
-                </select>
-                <span className="text-xs text-slate-500">长周期默认只渲染一个月，避免页面卡顿。</span>
-              </div>
+            {!useMonthOverview && monthGroups.length > 1 ? (
+              <MonthSwitcher months={monthGroups.map(([month]) => month)} activeMonth={activeMonth} onChange={setActiveMonth} />
             ) : null}
+
             {visibleMonthGroups.map(([month, days]) => (
-              <div key={month} className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-semibold text-slate-950">{month}</h3>
-                    {useMonthOverview ? (
-                      <button type="button" onClick={() => setActiveMonth("")} className="text-sm font-medium text-slate-600 hover:text-slate-950">返回月份总览</button>
-                    ) : null}
-                  </div>
-                  <span className="text-sm text-slate-500">{TASK_SCHEDULE_MODE_LABELS[preview.task.scheduleMode]}</span>
-                </div>
-                <div className="grid gap-3 md:grid-cols-7">
-                  {Array.from({ length: Math.max(0, new Date(`${days[0].dateKey}T00:00:00.000Z`).getUTCDay() === 0 ? 6 : new Date(`${days[0].dateKey}T00:00:00.000Z`).getUTCDay() - 1) }).map((_, index) => (
-                    <div key={`blank-${index}`} className="hidden md:block" />
-                  ))}
-                  {days.map((day) => <DayCard key={day.dateKey} day={day} busy={busy} onEdit={openEdit} onToggleLock={toggleLock} />)}
-                </div>
-              </div>
+              <CalendarMonth
+                key={month}
+                month={month}
+                days={days}
+                busy={busy}
+                taskModeLabel={TASK_SCHEDULE_MODE_LABELS[preview.task.scheduleMode]}
+                showBackToOverview={useMonthOverview}
+                onBackToOverview={() => setActiveMonth("")}
+                onEdit={openEdit}
+                onToggleLock={toggleLock}
+              />
             ))}
           </div>
 
@@ -379,92 +325,276 @@ export function SchedulePreviewClient({ taskId }: { taskId: string }) {
       ) : null}
 
       {editingCell ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg bg-white shadow-xl">
-            <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">修改人员</h3>
-                <p className="text-sm text-slate-600">{editingCell.dateKey} {editingCell.timeSlotLabel} {editingCell.label}，需要 {editingCell.requiredDoctors} 人</p>
-              </div>
-              <button onClick={() => setEditingCell(null)} className="rounded-md p-1 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
-            </div>
-            <div className="space-y-5 px-5 py-4">
-              {editingCell.locked ? <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">该单元已锁定，请先解锁后再修改。</div> : null}
-              <CandidateGroup
-                title="合规候选人"
-                candidates={editingCell.candidates.filter((candidate) => candidate.compliant)}
-                selectedDoctorIds={selectedDoctorIds}
-                setSelectedDoctorIds={setSelectedDoctorIds}
-                disabled={editingCell.locked}
-              />
-              <div>
-                <button onClick={() => setShowNonCompliant((value) => !value)} className="text-sm font-medium text-slate-700 hover:text-slate-950">
-                  {showNonCompliant ? "收起不合规候选人" : "展开不合规候选人"}
-                </button>
-                {showNonCompliant ? (
-                  <CandidateGroup
-                    title="不合规候选人"
-                    candidates={editingCell.candidates.filter((candidate) => !candidate.compliant)}
-                    selectedDoctorIds={selectedDoctorIds}
-                    setSelectedDoctorIds={setSelectedDoctorIds}
-                    disabled={editingCell.locked || !forceOverride}
-                    showReasons
-                  />
-                ) : null}
-              </div>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" checked={forceOverride} onChange={(event) => setForceOverride(event.target.checked)} />
-                强制覆盖规则
-              </label>
-              {forceOverride ? (
-                <textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} rows={3} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="必须填写强制覆盖原因" />
-              ) : null}
-            </div>
-            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-              <button onClick={() => setEditingCell(null)} className="focus-ring rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700">取消</button>
-              <button onClick={() => void saveEdit()} disabled={Boolean(busy) || editingCell.locked} className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300">
-                {busy === "edit" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                保存修改
-              </button>
-            </div>
-          </div>
-        </div>
+        <EditModal
+          cell={editingCell}
+          busy={busy}
+          selectedDoctorIds={selectedDoctorIds}
+          setSelectedDoctorIds={setSelectedDoctorIds}
+          showNonCompliant={showNonCompliant}
+          setShowNonCompliant={setShowNonCompliant}
+          forceOverride={forceOverride}
+          setForceOverride={setForceOverride}
+          overrideReason={overrideReason}
+          setOverrideReason={setOverrideReason}
+          onClose={() => setEditingCell(null)}
+          onSave={() => void saveEdit()}
+        />
       ) : null}
     </section>
   );
 }
 
-function DayCard({ day, busy, onEdit, onToggleLock }: { day: CalendarDay; busy: string; onEdit: (cell: Cell) => void; onToggleLock: (cell: Cell) => void }) {
+function MonthOverview({ summaries, onOpen }: { summaries: ReturnType<typeof buildMonthSummary>[]; onOpen: (month: string) => void }) {
   return (
-    <div className={`min-h-[220px] rounded-lg border border-slate-200 p-3 shadow-sm ${dateTypeClass[day.dateType] ?? "bg-white"}`}>
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <div className="font-semibold text-slate-950">{day.dateKey.slice(5)} {day.weekdayLabel}</div>
-          {day.dateType !== "WORKDAY" ? <span className="mt-1 inline-flex rounded-full border border-slate-200 bg-white/70 px-2 py-0.5 text-[11px] text-slate-600">{day.dateTypeLabel}</span> : null}
-        </div>
-        {day.conflicts.length ? <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] text-red-700"><AlertTriangle size={12} />{day.conflicts.length}</span> : null}
+    <div className="space-y-3">
+      <div>
+        <h3 className="text-lg font-semibold text-slate-950">月份总览</h3>
+        <p className="mt-1 text-sm text-slate-500">长期周期先按月份查看概览，点击月份后进入该月日历明细。</p>
       </div>
-      <div className="space-y-2">
-        {day.cells.length ? day.cells.map((cell) => (
-          <div key={cell.key} className={`rounded-md border bg-white/85 p-2 ${cell.conflicts.length || cell.manualOverride ? "border-red-200" : "border-slate-200"}`}>
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-medium text-slate-900">{cell.label}</div>
-              <button disabled={busy === `lock:${cell.key}` || !cell.assignments.length} onClick={() => void onToggleLock(cell)} className="rounded-md p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-40" title={cell.locked ? "解锁" : "锁定"}>
-                {cell.locked ? <Lock size={14} /> : <Unlock size={14} />}
-              </button>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {summaries.map((summary) => (
+          <button
+            type="button"
+            key={summary.month}
+            onClick={() => onOpen(summary.month)}
+            className="focus-ring rounded-lg border border-slate-200 bg-white p-4 text-left shadow-table hover:border-hospital-green"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="text-lg font-semibold text-slate-950">{formatMonthTitle(summary.month)}</div>
+              {summary.conflictCount || summary.unfilledAssignments ? (
+                <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">需处理</span>
+              ) : (
+                <span className="rounded-full bg-teal-50 px-2 py-0.5 text-xs text-hospital-green">正常</span>
+              )}
             </div>
-            <div className="mt-1 text-xs text-slate-500">{cell.timeSlotLabel} · {cell.assignments.length}/{cell.requiredDoctors} 人</div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {cell.assignments.length ? cell.assignments.map((assignment) => (
-                <span key={assignment.id} className={`rounded-full px-2 py-0.5 text-xs ${assignment.manualOverride ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-700"}`}>
-                  {assignment.doctor.name}{assignment.manualOverride ? " ⚠" : ""}
-                </span>
-              )) : <span className="text-xs text-slate-400">未排</span>}
-            </div>
-            {cell.conflicts.length ? <div className="mt-2 text-xs text-red-700">{cell.conflicts[0].description}</div> : null}
-            <button onClick={() => onEdit(cell)} className="mt-2 text-xs font-medium text-hospital-green hover:text-teal-800">修改人员</button>
+            <dl className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              <SummaryMini label="总班次数" value={summary.totalAssignments} />
+              <SummaryMini label="夜班数" value={summary.nightAssignments} />
+              <SummaryMini label="周末班" value={summary.weekendAssignments} />
+              <SummaryMini label="节假日班" value={summary.holidayAssignments} />
+              <SummaryMini label="冲突数" value={summary.conflictCount} alert={summary.conflictCount > 0} />
+              <SummaryMini label="未排满" value={summary.unfilledAssignments} alert={summary.unfilledAssignments > 0} />
+            </dl>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MonthSwitcher({ months, activeMonth, onChange }: { months: string[]; activeMonth: string; onChange: (month: string) => void }) {
+  const currentIndex = Math.max(0, months.indexOf(activeMonth));
+  const previous = months[currentIndex - 1];
+  const next = months[currentIndex + 1];
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <button type="button" disabled={!previous} onClick={() => previous && onChange(previous)} className="focus-ring rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-30">
+        上个月
+      </button>
+      <select value={activeMonth} onChange={(event) => onChange(event.target.value)} className="focus-ring rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-900">
+        {months.map((month) => <option key={month} value={month}>{formatMonthTitle(month)}</option>)}
+      </select>
+      <button type="button" disabled={!next} onClick={() => next && onChange(next)} className="focus-ring rounded-md px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-30">
+        下个月
+      </button>
+    </div>
+  );
+}
+
+function CalendarMonth({
+  month,
+  days,
+  busy,
+  taskModeLabel,
+  showBackToOverview,
+  onBackToOverview,
+  onEdit,
+  onToggleLock
+}: {
+  month: string;
+  days: CalendarDay[];
+  busy: string;
+  taskModeLabel: string;
+  showBackToOverview: boolean;
+  onBackToOverview: () => void;
+  onEdit: (cell: Cell) => void;
+  onToggleLock: (cell: Cell) => void;
+}) {
+  const slots = useMemo(() => buildCalendarSlots(month, days), [month, days]);
+  return (
+    <section className="overflow-hidden rounded-[1.25rem] border border-slate-200 bg-white shadow-table">
+      <div className="flex items-center justify-between gap-3 px-4 py-4">
+        <div className="w-20">
+          {showBackToOverview ? (
+            <button type="button" onClick={onBackToOverview} className="text-sm font-medium text-slate-600 hover:text-slate-950">总览</button>
+          ) : null}
+        </div>
+        <div className="text-center">
+          <h3 className="text-2xl font-semibold tracking-normal text-slate-950">{formatMonthTitle(month)}</h3>
+          <div className="mt-1 text-xs text-slate-500">{taskModeLabel}</div>
+        </div>
+        <div className="w-20 text-right text-xs text-slate-400">日历预览</div>
+      </div>
+
+      <div className="grid grid-cols-7 border-y border-slate-100 bg-white text-center text-xs font-medium text-slate-500">
+        {WEEK_HEADERS.map((header, index) => (
+          <div key={header} className={`py-2 ${index === 0 ? "text-red-500" : index === 6 ? "text-slate-400" : ""}`}>{header}</div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 bg-slate-100">
+        {slots.map((slot) => (
+          <CalendarDayCell key={slot.key} slot={slot} busy={busy} onEdit={onEdit} onToggleLock={onToggleLock} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CalendarDayCell({ slot, busy, onEdit, onToggleLock }: { slot: CalendarSlot; busy: string; onEdit: (cell: Cell) => void; onToggleLock: (cell: Cell) => void }) {
+  const day = slot.day;
+  const jsDay = new Date(`${slot.dateKey}T00:00:00.000Z`).getUTCDay();
+  const isSunday = jsDay === 0;
+  const dayClass = day ? dateTypeClass[day.dateType] ?? "bg-white" : "bg-slate-50/70";
+  return (
+    <div className={`min-h-[112px] border-b border-r border-slate-100 p-1.5 sm:min-h-[148px] sm:p-2 ${dayClass} ${slot.inMonth ? "" : "text-slate-300"}`}>
+      <div className="flex items-start justify-between gap-1">
+        <div>
+          <div className={`text-sm font-semibold ${slot.isToday ? "inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-950 px-1 text-white" : isSunday ? "text-red-500" : slot.inMonth ? "text-slate-950" : "text-slate-300"}`}>
+            {slot.dayNumber}
           </div>
-        )) : <div className="rounded-md border border-dashed border-slate-200 bg-white/60 px-3 py-8 text-center text-sm text-slate-400">未开放</div>}
+          {day ? <div className="mt-0.5 text-[10px] text-slate-400">{day.weekdayLabel}</div> : null}
+        </div>
+        {day?.conflicts.length ? (
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">
+            <AlertTriangle size={10} />{day.conflicts.length}
+          </span>
+        ) : null}
+      </div>
+
+      {day && day.dateType !== "WORKDAY" && day.dateType !== "WEEKEND" ? (
+        <div className="mt-1 truncate rounded-full bg-white/75 px-1.5 py-0.5 text-[10px] text-slate-600">{day.dateTypeLabel}</div>
+      ) : null}
+
+      <div className="mt-2 space-y-1">
+        {day?.cells.length ? (
+          <>
+            {day.cells.slice(0, 5).map((cell) => (
+              <CalendarShiftPill key={cell.key} cell={cell} busy={busy} onEdit={onEdit} onToggleLock={onToggleLock} />
+            ))}
+            {day.cells.length > 5 ? <div className="text-[10px] text-slate-400">还有 {day.cells.length - 5} 个班次</div> : null}
+          </>
+        ) : day ? (
+          <div className="pt-3 text-center text-[10px] text-slate-300">未开放</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CalendarShiftPill({ cell, busy, onEdit, onToggleLock }: { cell: Cell; busy: string; onEdit: (cell: Cell) => void; onToggleLock: (cell: Cell) => void }) {
+  const missing = Math.max(0, cell.requiredDoctors - cell.assignments.length);
+  const names = cell.assignments.map((assignment) => assignment.doctor.name).join("、");
+  const tone = cell.conflicts.length || missing > 0
+    ? "border-red-200 bg-red-50 text-red-800"
+    : cell.manualOverride
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : "border-sky-200 bg-sky-100 text-sky-900";
+  return (
+    <div className={`group flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] leading-tight sm:text-xs ${tone}`}>
+      <button type="button" onClick={() => onEdit(cell)} className="min-w-0 flex-1 text-left">
+        <div className="truncate font-medium">{cell.label}</div>
+        <div className="truncate opacity-80">{names || `缺 ${missing} 人`}</div>
+      </button>
+      <button
+        type="button"
+        disabled={busy === `lock:${cell.key}` || !cell.assignments.length}
+        onClick={() => void onToggleLock(cell)}
+        className="shrink-0 rounded p-0.5 opacity-70 hover:bg-white/60 disabled:opacity-25"
+        title={cell.locked ? "解锁" : "锁定"}
+      >
+        {cell.locked ? <Lock size={11} /> : <Unlock size={11} />}
+      </button>
+    </div>
+  );
+}
+
+function EditModal({
+  cell,
+  busy,
+  selectedDoctorIds,
+  setSelectedDoctorIds,
+  showNonCompliant,
+  setShowNonCompliant,
+  forceOverride,
+  setForceOverride,
+  overrideReason,
+  setOverrideReason,
+  onClose,
+  onSave
+}: {
+  cell: Cell;
+  busy: string;
+  selectedDoctorIds: string[];
+  setSelectedDoctorIds: (value: string[]) => void;
+  showNonCompliant: boolean;
+  setShowNonCompliant: (value: boolean | ((previous: boolean) => boolean)) => void;
+  forceOverride: boolean;
+  setForceOverride: (value: boolean) => void;
+  overrideReason: string;
+  setOverrideReason: (value: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-lg bg-white shadow-xl">
+        <div className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-950">修改人员</h3>
+            <p className="text-sm text-slate-600">{cell.dateKey} {cell.timeSlotLabel} {cell.label}，需要 {cell.requiredDoctors} 人</p>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
+        </div>
+        <div className="space-y-5 px-5 py-4">
+          {cell.locked ? <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">该单元已锁定，请先解锁后再修改。</div> : null}
+          <CandidateGroup
+            title="合规候选人"
+            candidates={cell.candidates.filter((candidate) => candidate.compliant)}
+            selectedDoctorIds={selectedDoctorIds}
+            setSelectedDoctorIds={setSelectedDoctorIds}
+            disabled={cell.locked}
+          />
+          <div>
+            <button onClick={() => setShowNonCompliant((value) => !value)} className="text-sm font-medium text-slate-700 hover:text-slate-950">
+              {showNonCompliant ? "收起不合规候选人" : "展开不合规候选人"}
+            </button>
+            {showNonCompliant ? (
+              <CandidateGroup
+                title="不合规候选人"
+                candidates={cell.candidates.filter((candidate) => !candidate.compliant)}
+                selectedDoctorIds={selectedDoctorIds}
+                setSelectedDoctorIds={setSelectedDoctorIds}
+                disabled={cell.locked || !forceOverride}
+                showReasons
+              />
+            ) : null}
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={forceOverride} onChange={(event) => setForceOverride(event.target.checked)} />
+            强制覆盖规则
+          </label>
+          {forceOverride ? (
+            <textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} rows={3} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" placeholder="必须填写强制覆盖原因" />
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button onClick={onClose} className="focus-ring rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-700">取消</button>
+          <button onClick={onSave} disabled={Boolean(busy) || cell.locked} className="focus-ring inline-flex items-center gap-2 rounded-md bg-hospital-green px-4 py-2 text-sm font-medium text-white disabled:bg-slate-300">
+            {busy === "edit" ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            保存修改
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -517,6 +647,15 @@ function SummaryCard({ label, value, tone = "normal" }: { label: string; value: 
   );
 }
 
+function SummaryMini({ label, value, alert = false }: { label: string; value: number; alert?: boolean }) {
+  return (
+    <div className="rounded-md bg-slate-50 p-2">
+      <dt className="text-xs text-slate-500">{label}</dt>
+      <dd className={alert ? "font-semibold text-red-700" : "font-semibold text-slate-950"}>{value}</dd>
+    </div>
+  );
+}
+
 function Legend({ className, label }: { className: string; label: string }) {
   return <span className="inline-flex items-center gap-1"><span className={`h-3 w-3 rounded border border-slate-200 ${className}`} />{label}</span>;
 }
@@ -526,8 +665,10 @@ function StatsPanel({ preview }: { preview: PreviewData }) {
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
       <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3 font-semibold text-slate-950"><UsersRound size={16} />人员统计</div>
       <div className="table-scroll">
-        <table className="min-w-[760px] w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-600"><tr>{["人员", "总班", "白/日班", "夜班", "周末", "节假日", "下夜班", "强制覆盖", "工作量"].map((header) => <th key={header} className="border-b border-slate-200 px-3 py-3 font-medium">{header}</th>)}</tr></thead>
+        <table className="min-w-[920px] w-full text-left text-sm">
+          <thead className="bg-slate-50 text-slate-600">
+            <tr>{["人员", "总班", "日班/白班", "夜班", "周末", "节假日", "下夜班", "强制覆盖", "工作量"].map((header) => <th key={header} className="border-b border-slate-200 px-3 py-3 font-medium">{header}</th>)}</tr>
+          </thead>
           <tbody>{preview.task.stats.perDoctor.map((doctor) => (
             <tr key={doctor.doctorId}>
               <td className="border-b border-slate-100 px-3 py-3">{doctor.name}</td>
@@ -561,6 +702,67 @@ function ConflictPanel({ conflicts }: { conflicts: Array<{ id: string; dateKey: 
       </div>
     </div>
   );
+}
+
+function buildMonthSummary(month: string, days: CalendarDay[]) {
+  let totalAssignments = 0;
+  let nightAssignments = 0;
+  let weekendAssignments = 0;
+  let holidayAssignments = 0;
+  let conflictCount = 0;
+  let unfilledAssignments = 0;
+  for (const day of days) {
+    const isWeekend = day.dateType === "WEEKEND" || isWeekendDate(day.dateKey);
+    const isHoliday = ["HOLIDAY", "PUBLIC_HOLIDAY", "CUSTOM_REST_DAY", "CUSTOM_REST"].includes(day.dateType);
+    conflictCount += day.conflicts.length;
+    for (const cell of day.cells) {
+      const assigned = cell.assignments.length;
+      totalAssignments += assigned;
+      unfilledAssignments += Math.max(0, cell.requiredDoctors - assigned);
+      if (cell.label.includes("夜") || cell.timeSlotLabel.includes("夜")) nightAssignments += assigned;
+      if (isWeekend) weekendAssignments += assigned;
+      if (isHoliday) holidayAssignments += assigned;
+    }
+  }
+  return { month, totalAssignments, nightAssignments, weekendAssignments, holidayAssignments, conflictCount, unfilledAssignments };
+}
+
+function buildCalendarSlots(month: string, days: CalendarDay[]): CalendarSlot[] {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const dayByKey = new Map(days.map((day) => [day.dateKey, day]));
+  const first = new Date(Date.UTC(year, monthNumber - 1, 1));
+  const leading = first.getUTCDay();
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const slotCount = Math.max(35, Math.ceil((leading + lastDay) / 7) * 7);
+  const today = utcDateKey(new Date());
+  return Array.from({ length: slotCount }).map((_, index) => {
+    const dayNumber = index - leading + 1;
+    const date = new Date(Date.UTC(year, monthNumber - 1, dayNumber));
+    const dateKey = utcDateKey(date);
+    return {
+      key: `${month}:${index}`,
+      dateKey,
+      dayNumber: date.getUTCDate(),
+      day: dayByKey.get(dateKey),
+      inMonth: date.getUTCMonth() === monthNumber - 1,
+      isToday: dateKey === today
+    };
+  });
+}
+
+function utcDateKey(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function formatMonthTitle(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const currentYear = new Date().getFullYear();
+  return year === currentYear ? `${monthNumber}月` : `${year}年${monthNumber}月`;
+}
+
+function isWeekendDate(dateKey: string) {
+  const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+  return day === 0 || day === 6;
 }
 
 async function fetchJson(url: string, options: { method?: string; body?: unknown } = {}) {
