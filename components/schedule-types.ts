@@ -176,6 +176,59 @@ export type ScheduleStats = {
     conflictCount: number;
   };
   warnings: string[];
+  fairnessGroups?: {
+    comparable: {
+      memberCount: number;
+      spreads: {
+        totalShiftSpread: number;
+        workloadSpread: number;
+        nightShiftSpread: number;
+        postNightSpread: number;
+        weekendDaySpread: number;
+        weekendNightSpread: number;
+        holidayDaySpread: number;
+        holidayNightSpread: number;
+      };
+      members: Array<{
+        doctorId: string;
+        name: string;
+        totalAssignments: number;
+        workloadTotal: number;
+        nightShiftAssignments: number;
+        secondLineAssignments: number;
+        reason: string;
+      }>;
+      explanation: string;
+    };
+    excluded: Array<{
+      doctorId: string;
+      name: string;
+      totalAssignments: number;
+      workloadTotal: number;
+      nightShiftAssignments: number;
+      secondLineAssignments: number;
+      reason: string;
+    }>;
+    limited: Array<{
+      doctorId: string;
+      name: string;
+      totalAssignments: number;
+      workloadTotal: number;
+      nightShiftAssignments: number;
+      secondLineAssignments: number;
+      reason: string;
+    }>;
+    scarce: Array<{
+      doctorId: string;
+      name: string;
+      totalAssignments: number;
+      workloadTotal: number;
+      nightShiftAssignments: number;
+      secondLineAssignments: number;
+      reason: string;
+    }>;
+    explanations: string[];
+  };
   identityGroups?: Array<{
     tagName: string;
     memberCount: number;

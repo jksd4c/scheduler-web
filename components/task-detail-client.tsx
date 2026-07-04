@@ -1638,6 +1638,58 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
     );
   }
 
+  function renderFairnessGroups() {
+    const groups = stats.fairnessGroups;
+    if (!groups) {
+      return null;
+    }
+    const sections = [
+      { key: "comparable", title: "公平参与人员", desc: groups.comparable.explanation, members: groups.comparable.members, tone: "teal" },
+      { key: "excluded", title: "不参与排班人员", desc: "未启用或身份策略排除自动排班，普通公平差异不把这类人员纳入比较。", members: groups.excluded, tone: "slate" },
+      { key: "limited", title: "身份优待人员", desc: "设置了目标、上限、减少排班或不计入公平统计，按身份策略单独解释。", members: groups.limited, tone: "amber" },
+      { key: "scarce", title: "资格稀缺人员", desc: "只在具备资格的人之间比较对应班次，避免把无资格人员纳入该班次公平差异。", members: groups.scarce, tone: "blue" }
+    ];
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white shadow-table">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="font-semibold text-slate-950">公平报告解释</h3>
+          <p className="mt-1 text-xs text-slate-500">不显示笼统公平分，只展示可比较人群、排除原因和资格稀缺说明。</p>
+        </div>
+        {groups.explanations.length ? (
+          <div className="space-y-2 border-b border-slate-100 px-4 py-3">
+            {groups.explanations.map((item) => (
+              <div key={item} className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">{item}</div>
+            ))}
+          </div>
+        ) : null}
+        <div className="grid gap-3 p-4 lg:grid-cols-2">
+          {sections.map((section) => (
+            <div key={section.key} className="rounded-lg border border-slate-200">
+              <div className="border-b border-slate-100 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-sm font-semibold text-slate-900">{section.title}</h4>
+                  <span className={`rounded-full px-2 py-0.5 text-xs ${section.tone === "teal" ? "bg-teal-50 text-teal-700" : section.tone === "amber" ? "bg-amber-50 text-amber-700" : section.tone === "blue" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"}`}>{section.members.length} 人</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{section.desc}</p>
+              </div>
+              <div className="max-h-56 overflow-auto">
+                {section.members.length ? section.members.map((member) => (
+                  <div key={member.doctorId} className="border-b border-slate-100 px-3 py-2 text-xs last:border-b-0">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-slate-900">{member.name}</span>
+                      <span className="text-slate-500">总班 {member.totalAssignments} · 工作量 {member.workloadTotal} · 夜班 {member.nightShiftAssignments} · 二线 {member.secondLineAssignments}</span>
+                    </div>
+                    <div className="mt-1 text-slate-500">{member.reason}</div>
+                  </div>
+                )) : <div className="px-3 py-6 text-center text-xs text-slate-400">暂无人员</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   function renderIdentityGroupStats() {
     if (!stats.identityGroups?.length) {
       return <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500">暂无身份/资格分组统计。未绑定资格的人不会参与对应班次公平比较。</div>;
@@ -2015,6 +2067,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
           </div>
           {renderStatsOverview()}
           {renderWarnings()}
+          {renderFairnessGroups()}
           {renderIdentityGroupStats()}
           {renderConflictReport()}
         </div>
@@ -2046,6 +2099,7 @@ export function TaskDetailClient({ taskId }: { taskId: string }) {
             </div>
           </div>
           {renderStatsOverview()}
+          {renderFairnessGroups()}
           {renderIdentityGroupStats()}
           {scheduleView === "room" ? renderScheduleGrid(false) : renderDoctorView()}
           {renderConflictReport()}

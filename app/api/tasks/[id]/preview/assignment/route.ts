@@ -75,6 +75,39 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       return NextResponse.json({ message: "强制覆盖必须填写原因", violations }, { status: 400 });
     }
 
+    const sameTimeConflicts = doctorIds
+      .map((doctorId) => {
+        const doctor = doctorsById.get(doctorId)!;
+        const conflictAssignments = task.assignments.filter(
+          (assignment) =>
+            assignment.doctorId === doctorId &&
+            toDateKey(assignment.date) === dateKey &&
+            asTimeSlot(assignment.timeSlot) === timeSlot &&
+            assignment.roomNumber !== roomNumber
+        );
+        return {
+          doctorId,
+          name: doctor.name,
+          assignments: conflictAssignments.map((assignment) => ({
+            id: assignment.id,
+            date: toDateKey(assignment.date),
+            timeSlot: asTimeSlot(assignment.timeSlot),
+            roomNumber: assignment.roomNumber
+          }))
+        };
+      })
+      .filter((item) => item.assignments.length > 0);
+
+    if (sameTimeConflicts.length > 0) {
+      return NextResponse.json(
+        {
+          message: "该人员同一时间已有其他班次，请先移除原排班或确认替换。",
+          conflicts: sameTimeConflicts
+        },
+        { status: 409 }
+      );
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.scheduleAssignment.deleteMany({
         where: { scheduleTaskId: task.id, date: dateFromKey(dateKey), timeSlot, roomNumber }
@@ -119,7 +152,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     return NextResponse.json(preview);
   } catch (error) {
     if (error instanceof Error && "status" in error) return authErrorResponse(error);
+    if (isUniqueConstraintError(error)) {
+      return NextResponse.json({ message: "该人员同一时间已有其他班次，请先移除原排班或确认替换。" }, { status: 409 });
+    }
     console.error(error);
     return NextResponse.json({ message: "修改预览排班失败" }, { status: 500 });
   }
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "P2002");
 }

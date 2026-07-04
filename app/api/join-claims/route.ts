@@ -13,9 +13,11 @@ export async function GET(request: Request) {
       where: { unitId: unit.id, ...(scheduleTaskId ? { scheduleTaskId } : {}) },
       orderBy: [{ reviewStatus: "asc" }, { createdAt: "desc" }]
     });
-    const rosterIds = claims.map((item) => item.rosterEntryId).filter(Boolean) as string[];
     const users = await prisma.user.findMany({ where: { id: { in: claims.map((item) => item.userId) } }, select: { id: true, username: true, displayName: true, phone: true } });
-    const roster = rosterIds.length ? await prisma.rosterEntry.findMany({ where: { id: { in: rosterIds } } }) : [];
+    const roster = await prisma.rosterEntry.findMany({
+      where: { unitId: unit.id, ...(scheduleTaskId ? { scheduleTaskId } : {}) },
+      orderBy: [{ status: "asc" }, { expectedName: "asc" }, { createdAt: "desc" }]
+    });
     return NextResponse.json({ claims, users, roster });
   } catch (error) {
     return authErrorResponse(error);

@@ -66,6 +66,17 @@ type PreviewData = {
         preferenceLabel?: string;
         preferenceSatisfaction?: string;
       }>;
+      fairnessGroups?: {
+        comparable: {
+          memberCount: number;
+          explanation: string;
+          members: Array<{ doctorId: string; name: string; totalAssignments: number; workloadTotal: number; nightShiftAssignments: number; secondLineAssignments: number; reason: string }>;
+        };
+        excluded: Array<{ doctorId: string; name: string; totalAssignments: number; workloadTotal: number; nightShiftAssignments: number; secondLineAssignments: number; reason: string }>;
+        limited: Array<{ doctorId: string; name: string; totalAssignments: number; workloadTotal: number; nightShiftAssignments: number; secondLineAssignments: number; reason: string }>;
+        scarce: Array<{ doctorId: string; name: string; totalAssignments: number; workloadTotal: number; nightShiftAssignments: number; secondLineAssignments: number; reason: string }>;
+        explanations: string[];
+      };
     };
   };
   calendarDays: CalendarDay[];
@@ -676,41 +687,70 @@ function Legend({ className, label }: { className: string; label: string }) {
 }
 
 function StatsPanel({ preview }: { preview: PreviewData }) {
+  const groups = preview.task.stats.fairnessGroups;
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
-      <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3 font-semibold text-slate-950"><UsersRound size={16} />人员统计</div>
-      <div className="table-scroll">
-        <table className="min-w-[1320px] w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-600">
-            <tr>{["人员", "总班", "总工作量", "白班", "夜班", "下夜班", "周末白班", "周末夜班", "节假日白班", "节假日夜班", "周六夜班", "周日夜班", "黄金夜班", "高负担夜班", "一线班", "二线班", "留班", "急诊班", "强制覆盖", "偏好", "偏好满足情况"].map((header) => <th key={header} className="border-b border-slate-200 px-3 py-3 font-medium">{header}</th>)}</tr>
-          </thead>
-          <tbody>{preview.task.stats.perDoctor.map((doctor) => (
-            <tr key={doctor.doctorId}>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.name}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.totalAssignments}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.workloadTotal ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.dayShiftAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.nightShiftAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.postNightAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendDayAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendNightAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayDayAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayNightAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.saturdayNightAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.sundayNightAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.goldenNightAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.highBurdenNightAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.firstLineAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.secondLineAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.onCallAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.emergencyAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.manualOverrideAssignments ?? 0}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.preferenceLabel ?? "无偏好"}</td>
-              <td className="border-b border-slate-100 px-3 py-3">{doctor.preferenceSatisfaction ?? "无偏好"}</td>
-            </tr>
-          ))}</tbody>
-        </table>
+    <div className="space-y-4">
+      {groups ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-table">
+          <div className="flex items-center gap-2 font-semibold text-slate-950"><UsersRound size={16} />公平报告解释</div>
+          <p className="mt-1 text-xs text-slate-500">{groups.comparable.explanation}</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <FairnessMini title="公平参与人员" count={groups.comparable.memberCount} />
+            <FairnessMini title="不参与排班人员" count={groups.excluded.length} />
+            <FairnessMini title="身份优待人员" count={groups.limited.length} />
+            <FairnessMini title="资格稀缺人员" count={groups.scarce.length} />
+          </div>
+          {groups.explanations.length ? (
+            <div className="mt-3 space-y-1">
+              {groups.explanations.map((item) => <div key={item} className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800">{item}</div>)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
+        <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3 font-semibold text-slate-950"><UsersRound size={16} />人员统计</div>
+        <div className="table-scroll">
+          <table className="min-w-[1320px] w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>{["人员", "总班", "总工作量", "白班", "夜班", "下夜班", "周末白班", "周末夜班", "节假日白班", "节假日夜班", "周六夜班", "周日夜班", "黄金夜班", "高负担夜班", "一线班", "二线班", "留班", "急诊班", "强制覆盖", "偏好", "偏好满足情况"].map((header) => <th key={header} className="border-b border-slate-200 px-3 py-3 font-medium">{header}</th>)}</tr>
+            </thead>
+            <tbody>{preview.task.stats.perDoctor.map((doctor) => (
+              <tr key={doctor.doctorId}>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.name}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.totalAssignments}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.workloadTotal ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.dayShiftAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.nightShiftAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.postNightAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendDayAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.weekendNightAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayDayAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.holidayNightAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.saturdayNightAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.sundayNightAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.goldenNightAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.highBurdenNightAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.firstLineAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.secondLineAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.onCallAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.emergencyAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.manualOverrideAssignments ?? 0}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.preferenceLabel ?? "无偏好"}</td>
+                <td className="border-b border-slate-100 px-3 py-3">{doctor.preferenceSatisfaction ?? "无偏好"}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function FairnessMini({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="rounded-md bg-slate-50 px-3 py-2">
+      <div className="text-xs text-slate-500">{title}</div>
+      <div className="mt-1 text-lg font-semibold text-slate-950">{count}</div>
     </div>
   );
 }

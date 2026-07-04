@@ -13,17 +13,28 @@ import {
   type ScheduleRequirementLike,
   type TimeSlotValue
 } from "@/lib/schedule-rules";
-import { parseEffectivePolicy, parseTagSnapshot, SHIFT_TYPE_CATEGORY, summarizeEligibility } from "@/lib/staff-policy";
+import { parseEffectivePolicy, parseTagSnapshot, SHIFT_TAG_REQUIREMENT, SHIFT_TYPE_CATEGORY, STAFF_SCHEDULING_MODE, summarizeEligibility } from "@/lib/staff-policy";
 
 export type DoctorLike = {
   id: string;
   name: string;
   doctorType: DoctorTypeValue;
+  active?: boolean;
   tagSnapshotJson?: unknown;
   policySnapshotJson?: unknown;
   preferredShiftType?: string | null;
   preferenceStrength?: string | null;
   preferenceNote?: string | null;
+};
+
+export type FairnessGroupMember = {
+  doctorId: string;
+  name: string;
+  totalAssignments: number;
+  workloadTotal: number;
+  nightShiftAssignments: number;
+  secondLineAssignments: number;
+  reason: string;
 };
 
 export type AssignmentLike = {
@@ -131,6 +142,18 @@ export type ScheduleStats = {
   perDoctor: DoctorScheduleStats[];
   overall: OverallScheduleStats;
   warnings: string[];
+  fairnessGroups: {
+    comparable: {
+      memberCount: number;
+      spreads: OverallScheduleStats["fairnessSpreads"];
+      members: FairnessGroupMember[];
+      explanation: string;
+    };
+    excluded: FairnessGroupMember[];
+    limited: FairnessGroupMember[];
+    scarce: FairnessGroupMember[];
+    explanations: string[];
+  };
   identityGroups: Array<{
     tagName: string;
     memberCount: number;
@@ -160,9 +183,20 @@ export function calculateScheduleStats(input: {
   const specialDateTypes = normalizeSpecialDateTypes(input.specialDateTypes);
 
   const perDoctorMap = new Map<string, DoctorScheduleStats>();
+  const doctorMetaById = new Map(
+    input.doctors.map((doctor) => [
+      doctor.id,
+      {
+        active: doctor.active !== false,
+        tags: parseTagSnapshot(doctor.tagSnapshotJson),
+        policy: parseEffectivePolicy(doctor.policySnapshotJson)
+      }
+    ])
+  );
   for (const doctor of input.doctors) {
-    const tags = parseTagSnapshot(doctor.tagSnapshotJson);
-    const policy = parseEffectivePolicy(doctor.policySnapshotJson);
+    const meta = doctorMetaById.get(doctor.id)!;
+    const tags = meta.tags;
+    const policy = meta.policy;
     perDoctorMap.set(doctor.id, {
       doctorId: doctor.id,
       name: doctor.name,
@@ -212,6 +246,32 @@ export function calculateScheduleStats(input: {
 
   const workedDateKeysByDoctor = new Map<string, Set<string>>();
   const requirementCells = requirementsToCells(input.requirements);
+  const shiftDemandById = new Map<
+    string,
+    {
+      shiftTypeId: string;
+      name: string;
+      category: string;
+      isNight: boolean;
+      demand: number;
+      cells: typeof requirementCells;
+    }
+  >();
+  for (const cell of requirementCells) {
+    if (!cell.shiftTypeId) continue;
+    const existing = shiftDemandById.get(cell.shiftTypeId) ?? {
+      shiftTypeId: cell.shiftTypeId,
+      name: cell.shiftType?.name ?? "未命名班次",
+      category: cell.shiftType?.category ?? "",
+      isNight: Boolean(cell.shiftType?.isNight) || cell.shiftType?.category === SHIFT_TYPE_CATEGORY.NIGHT,
+      demand: 0,
+      cells: [] as typeof requirementCells
+    };
+    existing.demand += cell.requiredDoctors;
+    existing.cells.push(cell);
+    shiftDemandById.set(cell.shiftTypeId, existing);
+  }
+  const shiftAssignmentsByDoctor = new Map<string, Map<string, number>>();
 
   for (const assignment of input.assignments) {
     const stats = perDoctorMap.get(assignment.doctorId);
@@ -247,6 +307,11 @@ export function calculateScheduleStats(input: {
     const matchingCell = requirementCells.find(
       (cell) => cell.dateKey === dateKey && cell.timeSlot === assignment.timeSlot && cell.roomNumber === assignment.roomNumber
     );
+    if (matchingCell?.shiftTypeId) {
+      const doctorShiftMap = shiftAssignmentsByDoctor.get(assignment.doctorId) ?? new Map<string, number>();
+      doctorShiftMap.set(matchingCell.shiftTypeId, (doctorShiftMap.get(matchingCell.shiftTypeId) ?? 0) + 1);
+      shiftAssignmentsByDoctor.set(assignment.doctorId, doctorShiftMap);
+    }
     const category = matchingCell?.shiftType?.category ?? "";
     const isNightShift = Boolean(matchingCell?.shiftType?.isNight) || category === SHIFT_TYPE_CATEGORY.NIGHT;
     if (isNightShift) {
@@ -329,16 +394,36 @@ export function calculateScheduleStats(input: {
   const doctorCount = input.doctors.length;
   const maxAssignments = totals.length ? Math.max(...totals) : 0;
   const minAssignments = totals.length ? Math.min(...totals) : 0;
+  const scarcity = buildScarcityReasons({
+    doctors: input.doctors,
+    doctorMetaById,
+    shiftDemandById,
+    shiftAssignmentsByDoctor
+  });
+  const fairnessGroups = buildFairnessGroups({
+    perDoctor,
+    doctors: input.doctors,
+    doctorMetaById,
+    scarceReasonByDoctorId: scarcity.scarceReasonByDoctorId,
+    scarcityExplanations: scarcity.explanations
+  });
+  const comparableStats = fairnessGroups.comparable.members
+    .map((member) => perDoctorMap.get(member.doctorId))
+    .filter(Boolean) as DoctorScheduleStats[];
+  const comparableTotals = comparableStats.map((item) => item.totalAssignments);
+  const comparableMaxAssignments = comparableTotals.length ? Math.max(...comparableTotals) : 0;
+  const comparableMinAssignments = comparableTotals.length ? Math.min(...comparableTotals) : 0;
   const fairnessSpreads = {
-    totalShiftSpread: spread(perDoctor.map((item) => item.totalAssignments)),
-    workloadSpread: spread(perDoctor.map((item) => item.workloadTotal)),
-    nightShiftSpread: spread(perDoctor.map((item) => item.nightShiftAssignments)),
-    postNightSpread: spread(perDoctor.map((item) => item.postNightAssignments)),
-    weekendDaySpread: spread(perDoctor.map((item) => item.weekendDayAssignments)),
-    weekendNightSpread: spread(perDoctor.map((item) => item.weekendNightAssignments)),
-    holidayDaySpread: spread(perDoctor.map((item) => item.holidayDayAssignments)),
-    holidayNightSpread: spread(perDoctor.map((item) => item.holidayNightAssignments))
+    totalShiftSpread: spread(comparableStats.map((item) => item.totalAssignments)),
+    workloadSpread: spread(comparableStats.map((item) => item.workloadTotal)),
+    nightShiftSpread: spread(comparableStats.map((item) => item.nightShiftAssignments)),
+    postNightSpread: spread(comparableStats.map((item) => item.postNightAssignments)),
+    weekendDaySpread: spread(comparableStats.map((item) => item.weekendDayAssignments)),
+    weekendNightSpread: spread(comparableStats.map((item) => item.weekendNightAssignments)),
+    holidayDaySpread: spread(comparableStats.map((item) => item.holidayDayAssignments)),
+    holidayNightSpread: spread(comparableStats.map((item) => item.holidayNightAssignments))
   };
+  fairnessGroups.comparable.spreads = fairnessSpreads;
   const missingFromConflicts = input.conflicts
     .filter((item) => item.conflictType === "UNFILLED")
     .reduce((sum, item) => sum + (item.missingCount ?? 0), 0);
@@ -346,7 +431,7 @@ export function calculateScheduleStats(input: {
   const hasUnavailableConflicts = perDoctor.some((item) => item.unavailableConflictCount > 0);
   const hasConsecutiveWork = perDoctor.some((item) => item.hasConsecutiveWork);
   const hasObviousImbalance =
-    doctorCount > 1 &&
+    comparableStats.length > 1 &&
     (fairnessSpreads.totalShiftSpread >= 2 ||
       fairnessSpreads.workloadSpread >= 2 ||
       fairnessSpreads.nightShiftSpread >= 2 ||
@@ -367,9 +452,24 @@ export function calculateScheduleStats(input: {
   if (hasConsecutiveWork) {
     warnings.push("存在连续上班人员，建议人工复核。");
   }
+  if (fairnessGroups.excluded.length) {
+    warnings.push(`有 ${fairnessGroups.excluded.length} 名人员按身份策略或启用状态不参与自动排班，未计入普通公平差异。`);
+  }
+  if (fairnessGroups.limited.length) {
+    warnings.push(`有 ${fairnessGroups.limited.length} 名人员设置了目标班次、上限、减少排班或不计入公平，应按身份策略单独解释。`);
+  }
+  if (fairnessGroups.scarce.length) {
+    warnings.push(`有 ${fairnessGroups.scarce.length} 名人员属于资格稀缺班次人员，对应班次应在具备资格人员中单独比较。`);
+  }
+  for (const explanation of fairnessGroups.explanations) {
+    warnings.push(explanation);
+  }
+  if (perDoctor.some((item) => item.manualOverrideAssignments > 0)) {
+    warnings.push("存在管理员强制覆盖排班，公平统计需结合覆盖原因复核。");
+  }
   if (hasObviousImbalance) {
-    warnings.push("当前排班存在明显不均衡，建议重新生成或手动调整。");
-    if (fairnessSpreads.totalShiftSpread >= 2) warnings.push(`总班次数差异 ${fairnessSpreads.totalShiftSpread} 次，最高 ${maxAssignments} 次，最低 ${minAssignments} 次。`);
+    warnings.push("可比较公平参与人员存在明显不均衡，建议重新生成或手动调整。");
+    if (fairnessSpreads.totalShiftSpread >= 2) warnings.push(`公平参与人员总班次数差异 ${fairnessSpreads.totalShiftSpread} 次，最高 ${comparableMaxAssignments} 次，最低 ${comparableMinAssignments} 次。`);
     if (fairnessSpreads.workloadSpread >= 2) warnings.push(`总工作量差异 ${fairnessSpreads.workloadSpread.toFixed(1)}。`);
     if (fairnessSpreads.nightShiftSpread >= 2) warnings.push(`夜班次数差异 ${fairnessSpreads.nightShiftSpread} 次。`);
     if (fairnessSpreads.postNightSpread >= 2) warnings.push(`下夜班次数差异 ${fairnessSpreads.postNightSpread} 次。`);
@@ -397,6 +497,7 @@ export function calculateScheduleStats(input: {
       conflictCount: input.conflicts.length
     },
     warnings,
+    fairnessGroups,
     identityGroups
   };
 }
@@ -439,6 +540,183 @@ function buildIdentityGroups(perDoctor: DoctorScheduleStats[]) {
       secondLineAssignments: group.secondLineAssignments
     }))
     .sort((a, b) => a.tagName.localeCompare(b.tagName, "zh-Hans-CN"));
+}
+
+function buildScarcityReasons(input: {
+  doctors: DoctorLike[];
+  doctorMetaById: Map<string, { active: boolean; tags: ReturnType<typeof parseTagSnapshot>; policy: ReturnType<typeof parseEffectivePolicy> }>;
+  shiftDemandById: Map<
+    string,
+    {
+      shiftTypeId: string;
+      name: string;
+      category: string;
+      isNight: boolean;
+      demand: number;
+      cells: ReturnType<typeof requirementsToCells>;
+    }
+  >;
+  shiftAssignmentsByDoctor: Map<string, Map<string, number>>;
+}) {
+  const scarceReasonByDoctorId = new Map<string, string[]>();
+  const explanations: string[] = [];
+
+  for (const shift of input.shiftDemandById.values()) {
+    const hasExplicitQualificationRule = shift.cells.some((cell) => Boolean(cell.shiftType?.requiredTags?.length));
+    const shouldInspectScarcity =
+      shift.category === SHIFT_TYPE_CATEGORY.SECOND_LINE ||
+      shift.category === SHIFT_TYPE_CATEGORY.FIRST_LINE ||
+      shift.isNight ||
+      hasExplicitQualificationRule;
+    if (!shouldInspectScarcity) continue;
+
+    const eligibleDoctors = input.doctors.filter((doctor) => {
+      const meta = input.doctorMetaById.get(doctor.id);
+      return meta ? shift.cells.some((cell) => isDoctorEligibleForFairnessCell(doctor, meta, cell)) : false;
+    });
+    if (eligibleDoctors.length === 0 || eligibleDoctors.length > 2 || shift.demand <= eligibleDoctors.length) continue;
+
+    const explanation = `${shift.name}仅 ${eligibleDoctors.length} 名合格人员，需求 ${shift.demand} 人次；该班次应在具备资格人员中单独比较。`;
+    explanations.push(explanation);
+    for (const doctor of eligibleDoctors) {
+      const assignedCount = input.shiftAssignmentsByDoctor.get(doctor.id)?.get(shift.shiftTypeId) ?? 0;
+      if (assignedCount <= 0) continue;
+      const reasons = scarceReasonByDoctorId.get(doctor.id) ?? [];
+      reasons.push(explanation);
+      scarceReasonByDoctorId.set(doctor.id, reasons);
+    }
+  }
+
+  return {
+    scarceReasonByDoctorId,
+    explanations: Array.from(new Set(explanations))
+  };
+}
+
+function buildFairnessGroups(input: {
+  perDoctor: DoctorScheduleStats[];
+  doctors: DoctorLike[];
+  doctorMetaById: Map<string, { active: boolean; tags: ReturnType<typeof parseTagSnapshot>; policy: ReturnType<typeof parseEffectivePolicy> }>;
+  scarceReasonByDoctorId: Map<string, string[]>;
+  scarcityExplanations: string[];
+}) {
+  const doctorsById = new Map(input.doctors.map((doctor) => [doctor.id, doctor]));
+  const comparableMembers: FairnessGroupMember[] = [];
+  const excluded: FairnessGroupMember[] = [];
+  const limited: FairnessGroupMember[] = [];
+  const scarce: FairnessGroupMember[] = [];
+
+  for (const stats of input.perDoctor) {
+    const doctor = doctorsById.get(stats.doctorId);
+    const meta = input.doctorMetaById.get(stats.doctorId);
+    if (!doctor || !meta) continue;
+
+    if (!meta.active) {
+      excluded.push(buildFairnessGroupMember(stats, "人员未启用，不参与自动排班。"));
+      continue;
+    }
+    if (!meta.policy.participatesInScheduling || meta.policy.schedulingMode === STAFF_SCHEDULING_MODE.EXCLUDED) {
+      excluded.push(buildFairnessGroupMember(stats, "身份策略设置为不参与排班，未计入普通公平差异。"));
+      continue;
+    }
+
+    const scarceReasons = input.scarceReasonByDoctorId.get(stats.doctorId);
+    if (scarceReasons?.length) {
+      scarce.push(buildFairnessGroupMember(stats, Array.from(new Set(scarceReasons)).join(" ")));
+      continue;
+    }
+
+    const limitedReason = getLimitedPolicyReason(meta.policy);
+    if (limitedReason) {
+      limited.push(buildFairnessGroupMember(stats, limitedReason));
+      continue;
+    }
+
+    comparableMembers.push(buildFairnessGroupMember(stats, "参与普通公平比较。"));
+  }
+
+  return {
+    comparable: {
+      memberCount: comparableMembers.length,
+      spreads: emptyFairnessSpreads(),
+      members: comparableMembers,
+      explanation: "普通公平差异只比较同一任务中启用、参与排班、未设置优待/限额、且不属于资格稀缺班次解释范围的人员。"
+    },
+    excluded,
+    limited,
+    scarce,
+    explanations: input.scarcityExplanations
+  };
+}
+
+function buildFairnessGroupMember(stats: DoctorScheduleStats, reason: string): FairnessGroupMember {
+  return {
+    doctorId: stats.doctorId,
+    name: stats.name,
+    totalAssignments: stats.totalAssignments,
+    workloadTotal: stats.workloadTotal,
+    nightShiftAssignments: stats.nightShiftAssignments,
+    secondLineAssignments: stats.secondLineAssignments,
+    reason
+  };
+}
+
+function getLimitedPolicyReason(policy: ReturnType<typeof parseEffectivePolicy>) {
+  const reasons: string[] = [];
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.REDUCED) reasons.push("减少排班");
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.FIXED_TARGET) reasons.push(`固定目标 ${policy.targetShiftsPerPeriod ?? "未设置"} 次`);
+  if (policy.schedulingMode === STAFF_SCHEDULING_MODE.MAX_LIMIT) reasons.push(`最大上限 ${policy.maxShiftsPerPeriod ?? "未设置"} 次`);
+  if (policy.targetShiftsPerPeriod != null) reasons.push(`目标班次 ${policy.targetShiftsPerPeriod} 次`);
+  if (policy.maxShiftsPerPeriod != null) reasons.push(`班次上限 ${policy.maxShiftsPerPeriod} 次`);
+  if (policy.workloadFactor < 0.99) reasons.push(`工作量系数 ${policy.workloadFactor}`);
+  if (!policy.countInFairness) reasons.push("不计入普通公平统计");
+  return reasons.length ? `身份策略：${Array.from(new Set(reasons)).join("，")}。` : "";
+}
+
+function isDoctorEligibleForFairnessCell(
+  doctor: DoctorLike,
+  meta: { active: boolean; tags: ReturnType<typeof parseTagSnapshot>; policy: ReturnType<typeof parseEffectivePolicy> },
+  cell: ReturnType<typeof requirementsToCells>[number]
+) {
+  if (!meta.active) return false;
+  if (!meta.policy.participatesInScheduling || meta.policy.schedulingMode === STAFF_SCHEDULING_MODE.EXCLUDED) return false;
+
+  const tagIds = new Set(meta.tags.map((tag) => tag.id));
+  const rules = cell.shiftType?.requiredTags ?? [];
+  for (const rule of rules.filter((item) => item.requirementType === SHIFT_TAG_REQUIREMENT.FORBIDDEN)) {
+    if (tagIds.has(rule.staffTagId)) return false;
+  }
+  for (const rule of rules.filter((item) => item.requirementType === SHIFT_TAG_REQUIREMENT.REQUIRED)) {
+    if (!tagIds.has(rule.staffTagId)) return false;
+  }
+  const allowed = rules.filter((item) => item.requirementType === SHIFT_TAG_REQUIREMENT.ALLOWED);
+  if (allowed.length && !allowed.some((rule) => tagIds.has(rule.staffTagId))) return false;
+
+  const category = cell.shiftType?.category ?? "";
+  const isNightShift = Boolean(cell.shiftType?.isNight) || category === SHIFT_TYPE_CATEGORY.NIGHT;
+  if (isNightShift && meta.policy.canWorkNightShift === false) return false;
+  if (!isNightShift && meta.policy.canWorkDayShift === false) return false;
+  if (category === SHIFT_TYPE_CATEGORY.FIRST_LINE && meta.policy.canWorkFirstLine === false) return false;
+  if (category === SHIFT_TYPE_CATEGORY.SECOND_LINE && meta.policy.canWorkSecondLine === false) return false;
+  if (category === SHIFT_TYPE_CATEGORY.EMERGENCY && meta.policy.canWorkEmergency === false) return false;
+  if (category === SHIFT_TYPE_CATEGORY.ON_CALL && meta.policy.canWorkOnCall === false) return false;
+  if (category === SHIFT_TYPE_CATEGORY.BACKUP && meta.policy.canWorkBackup === false) return false;
+
+  void doctor;
+  return true;
+}
+
+function emptyFairnessSpreads(): OverallScheduleStats["fairnessSpreads"] {
+  return {
+    totalShiftSpread: 0,
+    workloadSpread: 0,
+    nightShiftSpread: 0,
+    postNightSpread: 0,
+    weekendDaySpread: 0,
+    weekendNightSpread: 0,
+    holidayDaySpread: 0,
+    holidayNightSpread: 0
+  };
 }
 
 function normalizeSpecialDateTypes(input?: Record<string, string> | Map<string, string>) {

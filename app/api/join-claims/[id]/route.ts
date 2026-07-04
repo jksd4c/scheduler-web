@@ -3,7 +3,7 @@ import { authErrorResponse, requireManagedUnit } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { DOCTOR_TYPE } from "@/lib/schedule-rules";
-import { evaluateFeedbackStatus, JOIN_REVIEW_STATUS, MEMBER_FEEDBACK_STATUS, ROSTER_STATUS, STAFF_POOL_TYPE } from "@/lib/roster-workflow";
+import { evaluateFeedbackStatus, JOIN_MATCH_STATUS, JOIN_REVIEW_STATUS, MEMBER_FEEDBACK_STATUS, ROSTER_STATUS, STAFF_POOL_TYPE } from "@/lib/roster-workflow";
 import { buildTagSnapshot, resolveEffectivePolicy } from "@/lib/staff-policy";
 
 export const runtime = "nodejs";
@@ -18,6 +18,45 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const rejectReason = String(body.rejectReason ?? "").trim() || null;
 
     const updated = await prisma.$transaction(async (tx) => {
+      if (action === "BIND_ROSTER") {
+        if ([JOIN_REVIEW_STATUS.APPROVED, JOIN_REVIEW_STATUS.REJECTED].includes(current.reviewStatus as any)) {
+          throw new JoinReviewError("已确认或已驳回的申请不能重新绑定", 409);
+        }
+        const rosterEntryId = String(body.rosterEntryId ?? "").trim();
+        if (!rosterEntryId) {
+          throw new JoinReviewError("请选择要绑定的预录名单人员", 400);
+        }
+        const rosterEntry = await tx.rosterEntry.findUnique({ where: { id: rosterEntryId } });
+        if (!rosterEntry || rosterEntry.unitId !== unit.id) {
+          throw new JoinReviewError("预录名单不存在或无权限绑定", 404);
+        }
+        if (current.scheduleTaskId && rosterEntry.scheduleTaskId !== current.scheduleTaskId) {
+          throw new JoinReviewError("该预录名单不属于本次排班任务", 409);
+        }
+        if (current.staffPoolId && rosterEntry.staffPoolId !== current.staffPoolId) {
+          throw new JoinReviewError("该预录名单不属于当前人员池", 409);
+        }
+        if ([ROSTER_STATUS.CONFIRMED, ROSTER_STATUS.REJECTED, ROSTER_STATUS.NO_SHOW].includes(rosterEntry.status as any)) {
+          throw new JoinReviewError("该预录名单已确认、驳回或标记未报到，不能绑定", 409);
+        }
+        if (rosterEntry.userId && rosterEntry.userId !== current.userId) {
+          throw new JoinReviewError("该预录名单已被其他账号申请，不能绑定", 409);
+        }
+        await tx.rosterEntry.update({
+          where: { id: rosterEntry.id },
+          data: { status: ROSTER_STATUS.CLAIMED, userId: current.userId }
+        });
+        return tx.joinClaim.update({
+          where: { id: current.id },
+          data: {
+            rosterEntryId: rosterEntry.id,
+            matchStatus: JOIN_MATCH_STATUS.MANUAL_BOUND,
+            reviewStatus: JOIN_REVIEW_STATUS.PENDING,
+            rejectReason: rejectReason ?? "管理员手动绑定预录名单"
+          }
+        });
+      }
+
       if (action === "REJECT") {
         const claim = await tx.joinClaim.update({
           where: { id: current.id },
@@ -83,7 +122,14 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       hospitalId: unit.hospitalId,
       departmentId: unit.departmentId,
       unitId: unit.id,
-      action: action === "APPROVE" ? "APPROVE_JOIN_CLAIM" : action === "NO_SHOW" ? "MARK_ROSTER_NO_SHOW" : "REJECT_JOIN_CLAIM",
+      action:
+        action === "APPROVE"
+          ? "APPROVE_JOIN_CLAIM"
+          : action === "NO_SHOW"
+            ? "MARK_ROSTER_NO_SHOW"
+            : action === "BIND_ROSTER"
+              ? "BIND_EXCEPTION_JOIN_CLAIM"
+              : "REJECT_JOIN_CLAIM",
       targetType: "JoinClaim",
       targetId: current.id,
       beforeJson: current,

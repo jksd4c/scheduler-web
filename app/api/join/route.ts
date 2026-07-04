@@ -3,7 +3,7 @@ import { createUserSession, USER_ROLE } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { hashSecret, verifySecret } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
-import { JOIN_REVIEW_STATUS, matchRosterEntry, normalizePhone, ROSTER_STATUS } from "@/lib/roster-workflow";
+import { JOIN_MATCH_STATUS, JOIN_REVIEW_STATUS, matchRosterEntry, normalizePhone, ROSTER_STATUS } from "@/lib/roster-workflow";
 
 export const runtime = "nodejs";
 
@@ -35,6 +35,8 @@ export async function POST(request: Request) {
       select: { id: true, expectedName: true, expectedPhone: true, status: true }
     });
     const match = matchRosterEntry({ name: inputName, phone: inputPhone }, rosterEntries);
+    const requiresRosterMatch = Boolean(code.scheduleTaskId || code.staffPoolId);
+    const isRosterException = requiresRosterMatch && match.matchStatus === JOIN_MATCH_STATUS.UNMATCHED;
 
     const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.user.findFirst({
@@ -89,7 +91,8 @@ export async function POST(request: Request) {
           inputName,
           inputPhone,
           matchStatus: match.matchStatus,
-          reviewStatus: JOIN_REVIEW_STATUS.PENDING
+          reviewStatus: isRosterException ? JOIN_REVIEW_STATUS.EXCEPTION_PENDING : JOIN_REVIEW_STATUS.PENDING,
+          rejectReason: isRosterException ? "名单外申请：姓名和手机号未匹配到本次预录名单" : null
         }
       });
       if (match.rosterEntry) {
@@ -113,6 +116,32 @@ export async function POST(request: Request) {
       afterJson: { matchStatus: result.claim.matchStatus, reviewStatus: result.claim.reviewStatus, hasRosterEntry: Boolean(result.claim.rosterEntryId) },
       request
     });
+    if (isRosterException) {
+      await writeAuditLog({
+        actorUserId: result.user.id,
+        hospitalId: code.hospitalId,
+        departmentId: code.departmentId,
+        unitId: code.unitId,
+        action: "SUBMIT_UNMATCHED_JOIN_CLAIM",
+        targetType: "JoinClaim",
+        targetId: result.claim.id,
+        afterJson: {
+          matchStatus: result.claim.matchStatus,
+          reviewStatus: result.claim.reviewStatus,
+          scheduleTaskId: code.scheduleTaskId,
+          staffPoolId: code.staffPoolId
+        },
+        reason: "访问码绑定名单，但申请人未匹配预录名单",
+        request
+      });
+      return NextResponse.json(
+        {
+          claim: result.claim,
+          message: "你填写的姓名不在本次排班名单中，请联系排班管理员确认。"
+        },
+        { status: 409 }
+      );
+    }
     await createUserSession(result.user.id);
     return NextResponse.json({ claim: result.claim, redirectTo: "/member/feedback" }, { status: 201 });
   } catch (error) {

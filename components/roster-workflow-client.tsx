@@ -39,7 +39,7 @@ type JoinCode = {
 };
 type Claim = { id: string; rosterEntryId: string | null; userId: string; inputName: string; inputPhone: string; matchStatus: string; reviewStatus: string; createdAt: string; rejectReason: string | null };
 type UserSummary = { id: string; username: string; displayName: string | null; phone: string | null };
-type RosterSummary = Pick<RosterEntry, "id" | "expectedName" | "expectedPhone" | "staffType" | "poolType" | "status" | "includeInScheduling">;
+type RosterSummary = Pick<RosterEntry, "id" | "expectedName" | "expectedPhone" | "staffType" | "poolType" | "status" | "includeInScheduling" | "userId">;
 type MemberFeedback = {
   id: string;
   userId: string;
@@ -65,10 +65,12 @@ const statusLabels: Record<string, string> = {
   NO_SHOW: "未报到",
   PENDING: "待审核",
   APPROVED: "已通过",
+  EXCEPTION_PENDING: "异常申请",
   EXACT: "完全匹配",
   PHONE_MATCH: "手机号匹配",
   NAME_MATCH: "姓名匹配",
   FUZZY: "模糊匹配",
+  MANUAL_BOUND: "手动绑定",
   UNMATCHED: "未匹配",
   WAITING_IDENTITY_CONFIRMATION: "身份未确认",
   ACTIVE: "已生效",
@@ -496,6 +498,8 @@ export function JoinClaimsClient() {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [roster, setRoster] = useState<RosterSummary[]>([]);
   const [busyId, setBusyId] = useState("");
+  const [bindDrafts, setBindDrafts] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState("");
   async function load() {
     const data = await fetchJson("/api/join-claims");
     setClaims(data.claims ?? []);
@@ -503,30 +507,55 @@ export function JoinClaimsClient() {
     setRoster(data.roster ?? []);
   }
   useEffect(() => { void load(); }, []);
-  async function act(id: string, action: string) {
+  async function act(id: string, action: string, extra: Record<string, unknown> = {}) {
     setBusyId(id);
+    setMessage("");
     try {
-      await patchJson(`/api/join-claims/${id}`, { action });
+      await patchJson(`/api/join-claims/${id}`, { action, ...extra });
       await load();
+      setMessage(action === "BIND_ROSTER" ? "已绑定预录名单，可继续审核确认。" : "操作已完成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "操作失败");
     } finally {
       setBusyId("");
     }
   }
   const usersById = new Map(users.map((user) => [user.id, user]));
   const rosterById = new Map(roster.map((entry) => [entry.id, entry]));
-  return (
-    <section className="space-y-5">
-      <Header title="本期人员确认" desc="只有审核通过的成员反馈才会进入排班冲突处理。" />
+  const normalPendingClaims = claims.filter((claim) => claim.reviewStatus === "PENDING" && claim.matchStatus !== "UNMATCHED" && Boolean(claim.rosterEntryId));
+  const approvedClaims = claims.filter((claim) => claim.reviewStatus === "APPROVED");
+  const rejectedClaims = claims.filter((claim) => claim.reviewStatus === "REJECTED");
+  const exceptionClaims = claims.filter(
+    (claim) =>
+      claim.reviewStatus !== "APPROVED" &&
+      claim.reviewStatus !== "REJECTED" &&
+      (claim.reviewStatus === "EXCEPTION_PENDING" || claim.matchStatus === "UNMATCHED" || !claim.rosterEntryId)
+  );
+  const bindableRoster = roster.filter((entry) => !["CONFIRMED", "REJECTED", "NO_SHOW"].includes(entry.status));
+
+  function renderClaimSection(title: string, desc: string, sectionClaims: Claim[], mode: "pending" | "approved" | "rejected" | "exception") {
+    return (
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-table">
+        <div className="flex flex-col gap-1 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-950">{title}</h3>
+            <p className="mt-0.5 text-xs text-slate-500">{desc}</p>
+          </div>
+          <span className="text-xs font-medium text-slate-500">{sectionClaims.length} 条</span>
+        </div>
         <div className="table-scroll">
-          <table className="min-w-[960px] w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-600"><tr>{["预录姓名", "预录手机号", "注册姓名", "注册手机号", "人员池", "身份", "匹配状态", "审核状态", "操作"].map((h) => <th key={h} className="border-b border-slate-200 px-3 py-3 font-medium">{h}</th>)}</tr></thead>
-            <tbody>{claims.length ? claims.map((claim) => {
+          <table className="min-w-[1040px] w-full text-left text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>{["预录姓名", "预录手机号", "注册姓名", "注册手机号", "人员池", "身份", "匹配状态", "审核状态", "操作"].map((h) => <th key={h} className="border-b border-slate-200 px-3 py-3 font-medium">{h}</th>)}</tr>
+            </thead>
+            <tbody>{sectionClaims.length ? sectionClaims.map((claim) => {
               const user = usersById.get(claim.userId);
               const entry = claim.rosterEntryId ? rosterById.get(claim.rosterEntryId) : null;
               const canApprove = claim.reviewStatus === "PENDING" && Boolean(entry) && claim.matchStatus !== "UNMATCHED";
+              const selectableRoster = bindableRoster.filter((item) => !item.userId || item.userId === claim.userId);
+              const selectedRosterId = bindDrafts[claim.id] ?? selectableRoster[0]?.id ?? "";
               return (
-                <tr key={claim.id}>
+                <tr key={claim.id} className="align-top">
                   <td className="border-b border-slate-100 px-3 py-3">{entry?.expectedName ?? "-"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{entry?.expectedPhone ?? "-"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{claim.inputName || user?.displayName || user?.username || "-"}</td>
@@ -534,20 +563,71 @@ export function JoinClaimsClient() {
                   <td className="border-b border-slate-100 px-3 py-3">{entry ? poolLabels[entry.poolType] ?? entry.poolType : "-"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{entry?.staffType || "-"}</td>
                   <td className="border-b border-slate-100 px-3 py-3">{statusLabels[claim.matchStatus] ?? claim.matchStatus}</td>
-                  <td className="border-b border-slate-100 px-3 py-3">{statusLabels[claim.reviewStatus] ?? claim.reviewStatus}</td>
                   <td className="border-b border-slate-100 px-3 py-3">
-                    <div className="flex gap-2">
-                      <button disabled={busyId === claim.id || !canApprove} onClick={() => void act(claim.id, "APPROVE")} className="focus-ring inline-flex items-center gap-1 rounded-md border border-teal-200 px-2 py-1.5 text-xs text-hospital-green disabled:opacity-40"><UserCheck size={14} />确认</button>
-                      <button disabled={busyId === claim.id || claim.reviewStatus !== "PENDING"} onClick={() => void act(claim.id, "REJECT")} className="focus-ring inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 disabled:opacity-40"><UserX size={14} />驳回</button>
-                      <button disabled={busyId === claim.id || claim.reviewStatus !== "PENDING"} onClick={() => void act(claim.id, "NO_SHOW")} className="focus-ring rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-700 disabled:opacity-40">未报到</button>
-                    </div>
+                    <div>{statusLabels[claim.reviewStatus] ?? claim.reviewStatus}</div>
+                    {claim.rejectReason ? <div className="mt-1 max-w-[220px] text-xs text-slate-500">{claim.rejectReason}</div> : null}
+                  </td>
+                  <td className="border-b border-slate-100 px-3 py-3">
+                    {mode === "exception" ? (
+                      <div className="grid min-w-[300px] gap-2">
+                        <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                          名单外申请不会进入正常审核、反馈或排班算法。请先绑定预录名单，或直接驳回。
+                        </div>
+                        <select
+                          value={selectedRosterId}
+                          onChange={(event) => setBindDrafts((previous) => ({ ...previous, [claim.id]: event.target.value }))}
+                          className="focus-ring rounded-md border border-slate-300 px-2 py-1.5 text-xs"
+                        >
+                          {selectableRoster.length ? selectableRoster.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.expectedName}{item.expectedPhone ? `（${item.expectedPhone}）` : ""} · {poolLabels[item.poolType] ?? item.poolType} · {statusLabels[item.status] ?? item.status}
+                            </option>
+                          )) : <option value="">暂无可绑定预录名单</option>}
+                        </select>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            disabled={busyId === claim.id || !selectedRosterId || claim.reviewStatus === "REJECTED"}
+                            onClick={() => void act(claim.id, "BIND_ROSTER", { rosterEntryId: selectedRosterId, rejectReason: "管理员手动绑定异常申请" })}
+                            className="focus-ring inline-flex items-center gap-1 rounded-md border border-teal-200 px-2 py-1.5 text-xs text-hospital-green disabled:opacity-40"
+                          >
+                            <Link2 size={14} />绑定名单
+                          </button>
+                          <button
+                            disabled={busyId === claim.id || claim.reviewStatus === "REJECTED"}
+                            onClick={() => void act(claim.id, "REJECT", { rejectReason: "名单外申请，已驳回" })}
+                            className="focus-ring inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 disabled:opacity-40"
+                          >
+                            <UserX size={14} />驳回
+                          </button>
+                        </div>
+                      </div>
+                    ) : mode === "pending" ? (
+                      <div className="flex flex-wrap gap-2">
+                        <button disabled={busyId === claim.id || !canApprove} onClick={() => void act(claim.id, "APPROVE")} className="focus-ring inline-flex items-center gap-1 rounded-md border border-teal-200 px-2 py-1.5 text-xs text-hospital-green disabled:opacity-40"><UserCheck size={14} />确认</button>
+                        <button disabled={busyId === claim.id || claim.reviewStatus !== "PENDING"} onClick={() => void act(claim.id, "REJECT")} className="focus-ring inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1.5 text-xs text-red-700 disabled:opacity-40"><UserX size={14} />驳回</button>
+                        <button disabled={busyId === claim.id || claim.reviewStatus !== "PENDING"} onClick={() => void act(claim.id, "NO_SHOW")} className="focus-ring rounded-md border border-slate-300 px-2 py-1.5 text-xs text-slate-700 disabled:opacity-40">未报到</button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-500">已归档</span>
+                    )}
                   </td>
                 </tr>
               );
-            }) : <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">暂无加入申请</td></tr>}</tbody>
+            }) : <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">暂无记录</td></tr>}</tbody>
           </table>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <section className="space-y-5">
+      <Header title="本期人员确认" desc="只有审核通过的成员反馈才会进入排班冲突处理。" />
+      {message ? <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">{message}</div> : null}
+      {renderClaimSection("正常待确认", "已匹配本次预录名单的申请，可确认、驳回或标记未报到。", normalPendingClaims, "pending")}
+      {renderClaimSection("异常申请", "姓名和手机号未匹配预录名单的申请，默认不进入反馈、工作池和自动排班。", exceptionClaims, "exception")}
+      {renderClaimSection("已确认", "已经通过审核并进入对应人员池的申请。", approvedClaims, "approved")}
+      {renderClaimSection("已驳回", "已驳回或未报到的申请。", rejectedClaims, "rejected")}
     </section>
   );
 }
